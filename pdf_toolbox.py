@@ -17,6 +17,7 @@ import subprocess
 import os
 import sys
 import json
+import shutil
 
 # 默认 qpdf 路径（会被 get_qpdf_path 自动搜索覆盖）
 QPDF_PATH = ""
@@ -29,6 +30,23 @@ elif sys.platform == 'darwin':
 else:
     _CONFIG_DIR = os.path.join(os.path.expanduser('~'), '.config', 'PDF工具箱')
 _CONFIG_FILE = os.path.join(_CONFIG_DIR, 'config.json')
+
+# 平台相关常量
+if sys.platform == 'win32':
+    UI_FONT = 'Microsoft YaHei UI'
+    UI_FONT_FIXED = 'Segoe UI'
+    QPDF_EXE = 'qpdf.exe'
+    _NO_WINDOW = subprocess.CREATE_NO_WINDOW
+elif sys.platform == 'darwin':
+    UI_FONT = 'PingFang SC'
+    UI_FONT_FIXED = 'Helvetica Neue'
+    QPDF_EXE = 'qpdf'
+    _NO_WINDOW = 0
+else:
+    UI_FONT = 'Noto Sans CJK SC'
+    UI_FONT_FIXED = 'Monospace'
+    QPDF_EXE = 'qpdf'
+    _NO_WINDOW = 0
 
 # 导航项定义: (key, label, icon_color, icon_bg, group)
 # icon_color: 图形颜色; icon_bg: 圆角矩形浅底色
@@ -57,27 +75,21 @@ NAV_FG_ACTIVE = '#1A73E8'   # 选中文字颜色：Google蓝
 TITLE_BG = '#FFFFFF'        # 标题栏背景
 ACCENT_COLOR = '#1A73E8'    # 主题强调色
 
-def _qpdf_bin_name():
-    """返回当前平台 qpdf 可执行文件名"""
-    return 'qpdf.exe' if sys.platform == 'win32' else 'qpdf'
-
-
 def _search_qpdf():
     """搜索系统中可用的 qpdf"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    qpdf_bin = _qpdf_bin_name()
 
     search_paths = [
         # === 打包后的捆绑目录 ===
-        lambda: os.path.join(os.path.dirname(sys.executable), 'qpdf', qpdf_bin) if getattr(sys, 'frozen', False) else None,
-        lambda: os.path.join(os.path.dirname(sys.executable), '_internal', 'qpdf', qpdf_bin) if getattr(sys, 'frozen', False) else None,
-        lambda: os.path.join(sys._MEIPASS, 'qpdf', qpdf_bin) if hasattr(sys, '_MEIPASS') else None,
+        lambda: os.path.join(os.path.dirname(sys.executable), 'qpdf', QPDF_EXE) if getattr(sys, 'frozen', False) else None,
+        lambda: os.path.join(os.path.dirname(sys.executable), '_internal', 'qpdf', QPDF_EXE) if getattr(sys, 'frozen', False) else None,
+        lambda: os.path.join(sys._MEIPASS, 'qpdf', QPDF_EXE) if hasattr(sys, '_MEIPASS') else None,
     ]
 
     # === 脚本附近目录（开发/构建时使用）===
     for dir_name in [f'qpdf-12.3.2-msvc64', f'qpdf-12.3.2-linux-x86_64']:
-        search_paths.append(lambda dn=dir_name: os.path.join(os.path.dirname(script_dir), dn, 'bin', qpdf_bin))
-        search_paths.append(lambda dn=dir_name: os.path.join(script_dir, dn, 'bin', qpdf_bin))
+        search_paths.append(lambda dn=dir_name: os.path.join(os.path.dirname(script_dir), dn, 'bin', QPDF_EXE))
+        search_paths.append(lambda dn=dir_name: os.path.join(script_dir, dn, 'bin', QPDF_EXE))
 
     # === 系统安装路径 ===
     if sys.platform == 'win32':
@@ -101,9 +113,9 @@ def _search_qpdf():
 
     # === build_exe.py 下载缓存 ===
     search_paths.append(lambda: next(
-        (os.path.join(root, qpdf_bin)
+        (os.path.join(root, QPDF_EXE)
          for root, _, files in os.walk(os.path.join(script_dir, 'qpdf_cache'))
-         if qpdf_bin in files),
+         if QPDF_EXE in files),
         None
     ))
 
@@ -111,6 +123,10 @@ def _search_qpdf():
         path = entry() if callable(entry) else entry
         if path and os.path.isfile(path):
             return path
+    # === 最后兜底：搜索系统 PATH ===
+    which = shutil.which('qpdf')
+    if which:
+        return which
     return None
 
 
@@ -195,15 +211,16 @@ def _detect_icon_font():
                     return _ICON_FONT
     except Exception:
         pass
-    try:
-        # 2. 尝试系统 Segoe Fluent Icons / MDL2 Assets
-        families = tkfont.families()
-        for name in ["Segoe Fluent Icons", "Segoe MDL2 Assets"]:
-            if name in families:
-                _ICON_FONT = name
-                return _ICON_FONT
-    except Exception:
-        pass
+    if sys.platform == 'win32':
+        try:
+            # 2. (仅 Windows) 尝试系统 Segoe Fluent Icons / MDL2 Assets
+            families = tkfont.families()
+            for name in ["Segoe Fluent Icons", "Segoe MDL2 Assets"]:
+                if name in families:
+                    _ICON_FONT = name
+                    return _ICON_FONT
+        except Exception:
+            pass
     _ICON_FONT = ""  # 标记已检测但未找到
     return None
 
@@ -431,7 +448,7 @@ class PdfToolApp:
             # Fallback: 简单的 PDF 文字
             title_icon.create_text(13, 14, text="P", fill='white',
                                    font=('Arial', 11, 'bold'))
-        tk.Label(title_row, text="PDF工具箱", font=('Microsoft YaHei UI', 11, 'bold'),
+        tk.Label(title_row, text="PDF工具箱", font=(UI_FONT, 11, 'bold'),
                  bg=NAV_BG, fg='#1A73E8').pack(side='left', padx=(6, 0))
 
         # 分隔线
@@ -474,7 +491,7 @@ class PdfToolApp:
             if group != current_group:
                 if current_group is not None:
                     tk.Frame(nav_scrollable, height=4, bg=NAV_BG).pack()  # 组间距
-                tk.Label(nav_scrollable, text=group, font=('Microsoft YaHei UI', 8),
+                tk.Label(nav_scrollable, text=group, font=(UI_FONT, 8),
                          bg=NAV_BG, fg='#BBBBBB', anchor='w').pack(fill='x', padx=14, pady=(0, 2))
                 current_group = group
 
@@ -490,7 +507,7 @@ class PdfToolApp:
             _draw_icon(icon_canvas, key, icon_color, icon_bg)
             
             # 文字
-            text_lbl = tk.Label(btn, text=label, font=('Microsoft YaHei UI', 9),
+            text_lbl = tk.Label(btn, text=label, font=(UI_FONT, 9),
                                bg=NAV_BG, fg=NAV_FG, anchor='w')
             text_lbl.pack(side='left', fill='x', expand=True, padx=(2, 0))
             
@@ -515,7 +532,7 @@ class PdfToolApp:
         # 蓝色左侧竖线
         tk.Frame(title_frame, width=4, bg=ACCENT_COLOR).pack(side='left', fill='y', padx=(0, 0), pady=10)
         tk.Label(title_frame, textvariable=self.page_title_var,
-                 font=('Microsoft YaHei UI', 13, 'bold'),
+                 font=(UI_FONT, 13, 'bold'),
                  bg=TITLE_BG, fg='#333333').pack(side='left', padx=(10, 16))
         tk.Frame(title_frame, height=1, bg='#E8E8E8').pack(side='bottom', fill='x')
 
@@ -604,7 +621,7 @@ class PdfToolApp:
         row = ttk.Frame(parent)
         row.pack(fill='x', pady=5)
         ttk.Label(row, text=label, width=10, anchor='e',
-                  font=('Microsoft YaHei UI', 9)).pack(side='left')
+                  font=(UI_FONT, 9)).pack(side='left')
         entry = ttk.Entry(row, textvariable=var)
         entry.pack(side='left', fill='x', expand=True, padx=(8, 8))
         ttk.Button(row, text="浏览...", command=browse_cmd,
@@ -621,7 +638,7 @@ class PdfToolApp:
     def _make_hint(self, parent, text):
         """创建灰色提示文字"""
         ttk.Label(parent, text=text, bootstyle=SECONDARY,
-                  font=('Microsoft YaHei UI', 8),
+                  font=(UI_FONT, 8),
                   wraplength=560).pack(fill='x', pady=(6, 2))
 
     # ==================== 合并PDF ====================
@@ -636,7 +653,7 @@ class PdfToolApp:
         list_frame.pack(fill='both', expand=True)
         self.merge_listbox = tk.Listbox(list_frame, height=6, bg='#FAFCFF',
                                          selectbackground='#1A73E8', selectforeground='white',
-                                         font=('Segoe UI', 9), relief='solid', bd=1,
+                                         font=(UI_FONT_FIXED, 9), relief='solid', bd=1,
                                          borderwidth=1, highlightthickness=0,
                                          selectborderwidth=0, activestyle='none')
         sb = ttk.Scrollbar(list_frame, command=self.merge_listbox.yview, bootstyle=ROUND)
@@ -1151,80 +1168,93 @@ class PdfToolApp:
     # ==================== 批量打印 ====================
     @staticmethod
     def _get_printers():
-        """获取Windows所有可用打印机列表"""
+        """获取系统所有可用打印机列表"""
         printers = []
-        if sys.platform != 'win32':
-            return printers
         try:
-            import ctypes
-            # EnumPrintersW API
-            buf = ctypes.create_unicode_buffer(0)
-            buf_size = ctypes.wintypes.DWORD(0)
-            num_printers = ctypes.wintypes.DWORD(0)
-            # 第一次调用获取需要的缓冲区大小
-            ctypes.windll.winspool.drv.EnumPrintersW(
-                0x06,  # PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS
-                None, 2, buf, 0, ctypes.byref(buf_size), ctypes.byref(num_printers)
-            )
-            if buf_size.value > 0:
-                buf = ctypes.create_unicode_buffer(buf_size.value)
+            if sys.platform == 'win32':
+                import ctypes
+                buf = ctypes.create_unicode_buffer(0)
+                buf_size = ctypes.wintypes.DWORD(0)
+                num_printers = ctypes.wintypes.DWORD(0)
                 ctypes.windll.winspool.drv.EnumPrintersW(
-                    0x06, None, 2, buf, buf_size,
-                    ctypes.byref(buf_size), ctypes.byref(num_printers)
+                    0x06, None, 2, buf, 0, ctypes.byref(buf_size), ctypes.byref(num_printers)
                 )
-                # PRINTER_INFO_2: pPrinterName 在偏移 4*sizeof(void*) 处
-                # 但 32/64 位不同，用更简单的方式：直接解析字符串
-                ptr_size = ctypes.sizeof(ctypes.c_void_p)
-                offset_printer_name = 4 * ptr_size  # pPrinterName 是第5个字段
-                for i in range(num_printers.value):
-                    base = ctypes.addressof(buf) + i * 21 * ptr_size  # PRINTER_INFO_2W = 21 个指针
-                    name_ptr = ctypes.c_void_p.from_buffer_copy(
-                        ctypes.string_at(base + offset_printer_name, ptr_size))
-                    if name_ptr.value:
-                        name = ctypes.wstring_at(name_ptr.value)
-                        if name:
-                            printers.append(name)
+                if buf_size.value > 0:
+                    buf = ctypes.create_unicode_buffer(buf_size.value)
+                    ctypes.windll.winspool.drv.EnumPrintersW(
+                        0x06, None, 2, buf, buf_size,
+                        ctypes.byref(buf_size), ctypes.byref(num_printers)
+                    )
+                    ptr_size = ctypes.sizeof(ctypes.c_void_p)
+                    offset = 4 * ptr_size
+                    for i in range(num_printers.value):
+                        base = ctypes.addressof(buf) + i * 21 * ptr_size
+                        name_ptr = ctypes.c_void_p.from_buffer_copy(
+                            ctypes.string_at(base + offset, ptr_size))
+                        if name_ptr.value:
+                            name = ctypes.wstring_at(name_ptr.value)
+                            if name:
+                                printers.append(name)
+                if not printers:
+                    result = subprocess.run(
+                        ['powershell', '-NoProfile', '-Command',
+                         'Get-Printer | Select-Object -ExpandProperty Name'],
+                        capture_output=True, text=True, timeout=10,
+                        creationflags=_NO_WINDOW
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        printers = [n.strip() for n in result.stdout.strip().split('\n') if n.strip()]
+            else:
+                result = subprocess.run(
+                    ['lpstat', '-p'], capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.strip().split('\n'):
+                        if line.startswith('printer '):
+                            parts = line.split()
+                            if len(parts) > 1:
+                                printers.append(parts[1])
         except Exception:
             pass
-        # Fallback: 用 PowerShell 获取
-        if not printers:
-            try:
-                import subprocess
-                result = subprocess.run(
-                    ['powershell', '-NoProfile', '-Command',
-                     'Get-Printer | Select-Object -ExpandProperty Name'],
-                    capture_output=True, text=True, timeout=10,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    printers = [n.strip() for n in result.stdout.strip().split('\n') if n.strip()]
-            except Exception:
-                pass
         return printers
 
     @staticmethod
     def _get_default_printer():
         """获取当前默认打印机名称"""
-        if sys.platform != 'win32':
-            return ""
         try:
-            import ctypes
-            buf = ctypes.create_unicode_buffer(256)
-            size = ctypes.wintypes.DWORD(256)
-            ctypes.windll.winspool.drv.GetDefaultPrinterW(buf, ctypes.byref(size))
-            return buf.value
+            if sys.platform == 'win32':
+                import ctypes
+                buf = ctypes.create_unicode_buffer(256)
+                size = ctypes.wintypes.DWORD(256)
+                ctypes.windll.winspool.drv.GetDefaultPrinterW(buf, ctypes.byref(size))
+                return buf.value
+            else:
+                result = subprocess.run(
+                    ['lpstat', '-d'], capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    line = result.stdout.strip()
+                    if line.startswith('system default destination:'):
+                        parts = line.split(':')
+                        if len(parts) > 1:
+                            return parts[1].strip()
+                    return line.strip()
         except Exception:
-            return ""
+            pass
+        return ""
 
     @staticmethod
     def _set_default_printer(name):
         """设置默认打印机"""
-        if sys.platform != 'win32':
-            return False
         try:
-            import ctypes
-            result = ctypes.windll.winspool.drv.SetDefaultPrinterW(name)
-            return result != 0
+            if sys.platform == 'win32':
+                import ctypes
+                return ctypes.windll.winspool.drv.SetDefaultPrinterW(name) != 0
+            else:
+                result = subprocess.run(
+                    ['lpoptions', '-d', name], capture_output=True, text=True, timeout=10
+                )
+                return result.returncode == 0
         except Exception:
             return False
 
@@ -1235,7 +1265,7 @@ class PdfToolApp:
         pf = ttk.Frame(parent)
         pf.pack(fill='x', pady=(0, 6))
         ttk.Label(pf, text="选择打印机：", width=10, anchor='e',
-                  font=('Microsoft YaHei UI', 9)).pack(side='left')
+                  font=(UI_FONT, 9)).pack(side='left')
         self.printer_var = ttk.StringVar()
         printers = self._get_printers()
         default_printer = self._get_default_printer()
@@ -1267,7 +1297,7 @@ class PdfToolApp:
         list_frame.pack(fill='both', expand=True)
 
         self.print_listbox = tk.Listbox(list_frame, selectmode='extended',
-                                         font=('Microsoft YaHei UI', 9))
+                                         font=(UI_FONT, 9))
         scrollbar = ttk.Scrollbar(list_frame, orient='vertical',
                                   command=self.print_listbox.yview)
         self.print_listbox.config(yscrollcommand=scrollbar.set)
@@ -1279,7 +1309,7 @@ class PdfToolApp:
 
         # 统计
         self.print_count_lbl = ttk.Label(parent, text="共 0 个文件",
-                                          font=('Microsoft YaHei UI', 9),
+                                          font=(UI_FONT, 9),
                                           bootstyle=SECONDARY)
         self.print_count_lbl.pack(anchor='w', pady=(0, 4))
 
@@ -1356,7 +1386,6 @@ class PdfToolApp:
             Messagebox.show_warning("请选择打印机", "提示")
             return
 
-        # 确认打印
         n = len(self.print_files)
         result = Messagebox.yesno(
             f"确认要打印 {n} 个文件吗？\n打印机：{printer}",
@@ -1365,13 +1394,16 @@ class PdfToolApp:
         if not result:
             return
 
-        # 保存当前默认打印机，切换到用户选择的打印机
-        old_default = self._get_default_printer()
+        # Windows: 保存默认打印机，切换到用户选择的，打印完恢复
+        # Unix: lp -d 直接指定打印机，无需切换
+        old_default = None
         printer_changed = False
-        if printer != old_default:
-            printer_changed = self._set_default_printer(printer)
-            if not printer_changed:
-                Messagebox.show_warning(f"无法切换到打印机：{printer}\n将使用当前默认打印机打印。", "提示")
+        if sys.platform == 'win32':
+            old_default = self._get_default_printer()
+            if printer != old_default:
+                printer_changed = self._set_default_printer(printer)
+                if not printer_changed:
+                    Messagebox.show_warning(f"无法切换到打印机：{printer}\n将使用当前默认打印机打印。", "提示")
 
         success, fail = 0, 0
         for file_path in self.print_files:
@@ -1379,12 +1411,17 @@ class PdfToolApp:
                 fail += 1
                 continue
             try:
-                os.startfile(file_path, "print")
+                if sys.platform == 'win32':
+                    os.startfile(file_path, "print")
+                else:
+                    subprocess.run(
+                        ['lp', '-d', printer, file_path],
+                        capture_output=True, text=True, timeout=60
+                    )
                 success += 1
             except Exception:
                 fail += 1
 
-        # 恢复原来的默认打印机
         if printer_changed and old_default:
             self._set_default_printer(old_default)
 
@@ -1449,7 +1486,7 @@ class PdfToolApp:
         self.root.update()
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
-                                     creationflags=subprocess.CREATE_NO_WINDOW)
+                                     creationflags=_NO_WINDOW)
             if result.returncode == 0:
                 self.status_var.set(success_msg)
                 Messagebox.show_info(success_msg, "成功", parent=self.root)
@@ -1469,7 +1506,7 @@ class PdfToolApp:
         self.root.update()
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30,
-                                     creationflags=subprocess.CREATE_NO_WINDOW)
+                                     creationflags=_NO_WINDOW)
             info = result.stdout if result.stdout else result.stderr
             if not info:
                 info = "无输出信息"
@@ -1492,8 +1529,8 @@ if __name__ == '__main__':
     except ImportError:
         print('=' * 50)
         print('错误：未安装 ttkbootstrap 库！')
-        print('请先在 PowerShell 中执行以下命令安装：')
-        print('  pip install ttkbootstrap -i https://yumserver.dahuatech.com/pypi/simple/ --trusted-host yumserver.dahuatech.com')
+        print('请执行以下命令安装：')
+        print('  pip install ttkbootstrap')
         print('=' * 50)
         input('按回车键退出...')
         sys.exit(1)
