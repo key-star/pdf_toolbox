@@ -82,8 +82,11 @@ def _search_qpdf():
     search_paths = [
         # === 打包后的捆绑目录 ===
         lambda: os.path.join(os.path.dirname(sys.executable), 'qpdf', QPDF_EXE) if getattr(sys, 'frozen', False) else None,
+        lambda: os.path.join(os.path.dirname(sys.executable), 'qpdf', 'bin', QPDF_EXE) if getattr(sys, 'frozen', False) else None,
         lambda: os.path.join(os.path.dirname(sys.executable), '_internal', 'qpdf', QPDF_EXE) if getattr(sys, 'frozen', False) else None,
+        lambda: os.path.join(os.path.dirname(sys.executable), '_internal', 'qpdf', 'bin', QPDF_EXE) if getattr(sys, 'frozen', False) else None,
         lambda: os.path.join(sys._MEIPASS, 'qpdf', QPDF_EXE) if hasattr(sys, '_MEIPASS') else None,
+        lambda: os.path.join(sys._MEIPASS, 'qpdf', 'bin', QPDF_EXE) if hasattr(sys, '_MEIPASS') else None,
     ]
 
     # === 脚本附近目录（开发/构建时使用）===
@@ -717,17 +720,27 @@ class PdfToolApp:
 
         self._make_action_bar(parent, [("执 行 合 并", self._do_merge, PRIMARY)])
 
+    def _sync_merge_output(self):
+        if not self.merge_files:
+            self.merge_output.set('')
+        else:
+            first = os.path.normpath(self.merge_files[0])
+            base = os.path.splitext(os.path.basename(first))[0]
+            self.merge_output.set(os.path.join(os.path.dirname(first), f"{base}_merged.pdf"))
+
     def _merge_add(self):
         paths = filedialog.askopenfilenames(title="选择PDF文件", filetypes=[("PDF文件", "*.pdf")])
         for p in paths:
             self.merge_files.append(p)
             self.merge_listbox.insert('end', os.path.basename(p))
+        self._sync_merge_output()
 
     def _merge_remove(self):
         sel = self.merge_listbox.curselection()
         for i in reversed(sel):
             self.merge_listbox.delete(i)
             del self.merge_files[i]
+        self._sync_merge_output()
 
     def _merge_move(self, direction):
         sel = self.merge_listbox.curselection()
@@ -742,10 +755,12 @@ class PdfToolApp:
         for fp in self.merge_files:
             self.merge_listbox.insert('end', os.path.basename(fp))
         self.merge_listbox.selection_set(new_idx)
+        self._sync_merge_output()
 
     def _merge_clear(self):
         self.merge_files.clear()
         self.merge_listbox.delete(0, 'end')
+        self._sync_merge_output()
 
     def _do_merge(self):
         if len(self.merge_files) < 2:

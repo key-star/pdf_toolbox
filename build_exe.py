@@ -299,10 +299,11 @@ def build():
 
     log(f"使用 qpdf: {qpdf_path}")
 
-    # 复制 qpdf 根目录（包含 bin/ 和 lib/）到临时位置
+    # 复制 qpdf bin/ 目录内容到临时位置（去掉 bin/ 层级）
     qpdf_root = os.path.dirname(os.path.dirname(qpdf_path))
-    log(f"正在复制 qpdf: {qpdf_root} -> {TEMP_QPDF_DIR}")
-    shutil.copytree(qpdf_root, TEMP_QPDF_DIR)
+    qpdf_bin = os.path.join(qpdf_root, 'bin')
+    log(f"正在复制 qpdf: {qpdf_bin} -> {TEMP_QPDF_DIR}")
+    shutil.copytree(qpdf_bin, TEMP_QPDF_DIR)
 
     # 构建 PyInstaller 命令
     cmd = [
