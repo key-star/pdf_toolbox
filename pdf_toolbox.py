@@ -421,18 +421,23 @@ class PdfToolApp:
         main.pack(fill='both', expand=True)
 
         # --- 左侧导航栏 ---
-        nav_frame = ttk.Frame(main, width=170)
+        # 根据标题文字宽度动态计算导航栏宽度，适配不同系统/字体/DPI
+        _title_font = tk.font.Font(font=(UI_FONT, 11, 'bold'))
+        _title_px = _title_font.measure("PDF工具箱")
+        _nav_width = max(140, _title_px + 26 + 32)  # 文字 + 图标 + 两侧间距
+
+        nav_frame = ttk.Frame(main, width=_nav_width)
         nav_frame.pack(side='left', fill='y')
         nav_frame.pack_propagate(False)
 
         # 导航栏背景（白色清新风格）
-        nav_inner = tk.Frame(nav_frame, bg=NAV_BG, width=170)
+        nav_inner = tk.Frame(nav_frame, bg=NAV_BG, width=_nav_width)
         nav_inner.pack(fill='both', expand=True)
         nav_inner.pack_propagate(False)
 
         # 标题（带 Canvas 圆角矩形图标）- 固定在顶部
         title_row = tk.Frame(nav_inner, bg=NAV_BG)
-        title_row.pack(fill='x', padx=14, pady=(14, 6))
+        title_row.pack(fill='x', padx=12, pady=(14, 6))
         title_icon = tk.Canvas(title_row, width=26, height=26, bg=NAV_BG,
                                highlightthickness=0)
         title_icon.pack(side='left')
@@ -454,36 +459,72 @@ class PdfToolApp:
         # 分隔线
         tk.Frame(nav_inner, height=1, bg='#E8E8E8').pack(fill='x', padx=10, pady=(0, 8))
 
-        # 可滚动的按钮区域
-        nav_canvas = tk.Canvas(nav_inner, bg=NAV_BG, highlightthickness=0, width=150)
-        nav_scrollbar = ttk.Scrollbar(nav_inner, orient='vertical', command=nav_canvas.yview)
+        # 可滚动的按钮区域（Frame 隔离 pack/grid）
+        nav_scroll_frame = tk.Frame(nav_inner, bg=NAV_BG)
+        nav_canvas = tk.Canvas(nav_scroll_frame, bg=NAV_BG, highlightthickness=0)
+        nav_scrollbar = ttk.Scrollbar(nav_scroll_frame, orient='vertical', command=nav_canvas.yview)
         nav_scrollable = tk.Frame(nav_canvas, bg=NAV_BG)
 
-        nav_scrollable.bind('<Configure>',
-            lambda e: nav_canvas.configure(scrollregion=nav_canvas.bbox('all')))
-        nav_canvas.create_window((0, 0), window=nav_scrollable, anchor='nw',
-                                  width=150)
-        nav_canvas.configure(yscrollcommand=nav_scrollbar.set)
+        _nav_window = nav_canvas.create_window((0, 0), window=nav_scrollable, anchor='nw')
 
-        nav_canvas.pack(side='left', fill='both', expand=True)
-        nav_scrollbar.pack(side='right', fill='y')
+        nav_scroll_frame.pack(fill='both', expand=True)
+        nav_scroll_frame.grid_rowconfigure(0, weight=1)
+        nav_scroll_frame.grid_columnconfigure(0, weight=1)
+        nav_scroll_frame.grid_columnconfigure(1, weight=0)
 
-        # 鼠标滚轮支持（绑定到导航栏内所有子控件，避免 bind_all 冲突）
+        nav_canvas.grid(row=0, column=0, sticky='nsew')
+        nav_scrollbar.grid(row=0, column=1, sticky='ns')
+
+        # 画布尺寸变化时同步内层宽度
+        def _on_canvas_resize(e):
+            cw = e.width
+            if cw > 0:
+                nav_canvas.itemconfigure(_nav_window, width=cw)
+
+        nav_canvas.bind('<Configure>', _on_canvas_resize)
+
+        # 刷新滚动条状态
+        def _do_refresh_scrollbar():
+            try:
+                self.root.update_idletasks()
+                bbox = nav_canvas.bbox('all')
+                if bbox is None:
+                    return
+                content_h, canvas_h = bbox[3], nav_canvas.winfo_height()
+                if canvas_h < 10:
+                    return
+                need = content_h > canvas_h
+            except Exception:
+                return
+            if need:
+                nav_scrollbar.grid()
+                nav_canvas.configure(scrollregion=nav_canvas.bbox('all'))
+            else:
+                nav_scrollbar.grid_remove()
+                nav_canvas.yview_moveto(0)
+
+        def _refresh_scrollbar(*args):
+            nav_canvas.configure(scrollregion=nav_canvas.bbox('all'))
+            self.root.after_idle(_do_refresh_scrollbar)
+
+        nav_scrollable.bind('<Configure>', _refresh_scrollbar)
+        nav_inner.bind('<Configure>', _refresh_scrollbar)
+        self.root.bind('<Configure>', _refresh_scrollbar)
+
+        # 启动时先显示滚动条，窗口映射后再自动判断
+        self.root.after(200, _refresh_scrollbar)
+
+        # 鼠标滚轮（仅内容溢出时可用）
         def _on_mousewheel(event):
-            nav_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+            if nav_scrollbar.winfo_ismapped():
+                nav_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
 
         def _bind_mousewheel(widget):
             widget.bind('<MouseWheel>', _on_mousewheel)
             for child in widget.winfo_children():
                 _bind_mousewheel(child)
 
-        # 延迟绑定，等按钮都创建完
-        def _delayed_bind():
-            _bind_mousewheel(nav_scrollable)
-            nav_canvas.bind('<MouseWheel>', _on_mousewheel)
-            nav_scrollbar.bind('<MouseWheel>', _on_mousewheel)
-
-        self.root.after(100, _delayed_bind)
+        self.root.after(100, lambda: _bind_mousewheel(nav_scrollable))
 
         # 按组生成导航按钮
         current_group = None
@@ -492,12 +533,12 @@ class PdfToolApp:
                 if current_group is not None:
                     tk.Frame(nav_scrollable, height=4, bg=NAV_BG).pack()  # 组间距
                 tk.Label(nav_scrollable, text=group, font=(UI_FONT, 8),
-                         bg=NAV_BG, fg='#BBBBBB', anchor='w').pack(fill='x', padx=16, pady=(0, 2))
+                         bg=NAV_BG, fg='#BBBBBB', anchor='w').pack(fill='x', padx=14, pady=(0, 2))
                 current_group = group
 
             # 使用容器确保图标对齐
             btn = tk.Frame(nav_scrollable, bg=NAV_BG, cursor='hand2')
-            btn.pack(fill='x', padx=8, pady=1)
+            btn.pack(fill='x', padx=6, pady=1)
             
             # Canvas 图形图标（24x24）
             icon_canvas = tk.Canvas(btn, width=24, height=24, bg=NAV_BG,
