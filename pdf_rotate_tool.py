@@ -52,8 +52,12 @@ def _search_qpdf():
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
     search_paths = [
-        # 打包后的捆绑目录
+        # 打包后的捆绑目录（PyInstaller 单文件夹模式）
         lambda: os.path.join(os.path.dirname(sys.executable), 'qpdf', 'qpdf.exe') if getattr(sys, 'frozen', False) else None,
+        # PyInstaller 将数据放在 _internal/ 下（PyInstaller 6+）
+        lambda: os.path.join(os.path.dirname(sys.executable), '_internal', 'qpdf', 'qpdf.exe') if getattr(sys, 'frozen', False) else None,
+        # PyInstaller 单文件模式的临时解压目录
+        lambda: os.path.join(sys._MEIPASS, 'qpdf', 'qpdf.exe') if hasattr(sys, '_MEIPASS') else None,
         # 脚本所在目录的上级（如 E:\workspace\HomemadeTools\qpdf-12.3.2-msvc64）
         lambda: os.path.join(os.path.dirname(script_dir), f'qpdf-12.3.2-msvc64', 'bin', 'qpdf.exe'),
         # 脚本所在目录
