@@ -1,0 +1,16 @@
+# 忽略 Python 缓存和虚拟环境
+__pycache__/
+*.pyc
+venv/
+.env
+
+# 忽略构建和打包输出目录
+build/
+dist/
+
+# 忽略 IDE 配置文件
+.vscode/
+.idea/
+
+# 忽略你之前提到的 qpdf 原始下载包（如果你不想上传的话）
+qpdf-12.3.2-msvc64/
