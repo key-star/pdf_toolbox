@@ -17,7 +17,8 @@ import subprocess
 import os
 import sys
 
-QPDF_PATH = r"C:\Program Files\qpdf 12.3.2\bin\qpdf.exe"
+# 默认 qpdf 路径（会被 get_qpdf_path 自动搜索覆盖）
+QPDF_PATH = ""
 
 # 导航项定义: (key, label, icon_color, icon_bg, group)
 # icon_color: 图形颜色; icon_bg: 圆角矩形浅底色
@@ -46,14 +47,46 @@ NAV_FG_ACTIVE = '#1A73E8'   # 选中文字颜色：Google蓝
 TITLE_BG = '#FFFFFF'        # 标题栏背景
 ACCENT_COLOR = '#1A73E8'    # 主题强调色
 
+def _search_qpdf():
+    """搜索系统中可用的 qpdf.exe"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    search_paths = [
+        # 打包后的捆绑目录
+        lambda: os.path.join(os.path.dirname(sys.executable), 'qpdf', 'qpdf.exe') if getattr(sys, 'frozen', False) else None,
+        # 脚本所在目录的上级
+        lambda: os.path.join(os.path.dirname(script_dir), 'qpdf-12.3.2-msvc64', 'bin', 'qpdf.exe'),
+        # 脚本所在目录
+        lambda: os.path.join(script_dir, 'qpdf-12.3.2-msvc64', 'bin', 'qpdf.exe'),
+        # Program Files
+        r"C:\Program Files\qpdf 12.3.2\bin\qpdf.exe",
+        r"C:\Program Files\qpdf\bin\qpdf.exe",
+        r"C:\qpdf-12.3.2-msvc64\bin\qpdf.exe",
+        r"D:\qpdf-12.3.2-msvc64\bin\qpdf.exe",
+        # qpdf_cache
+        lambda: next(
+            (os.path.join(root, 'qpdf.exe')
+             for root, _, files in os.walk(os.path.join(script_dir, 'qpdf_cache'))
+             if 'qpdf.exe' in files),
+            None
+        ),
+    ]
+
+    for entry in search_paths:
+        path = entry() if callable(entry) else entry
+        if path and os.path.isfile(path):
+            return path
+    return None
+
+
 def get_qpdf_path():
-    """优先从打包目录查找qpdf，找不到则用默认路径"""
-    if getattr(sys, 'frozen', False):
-        base = os.path.dirname(sys.executable)
-        bundled = os.path.join(base, 'qpdf', 'qpdf.exe')
-        if os.path.isfile(bundled):
-            return bundled
-    return QPDF_PATH
+    """查找可用的 qpdf.exe，找到后缓存结果"""
+    if not hasattr(get_qpdf_path, '_cached'):
+        path = _search_qpdf()
+        if not path:
+            path = r"C:\Program Files\qpdf 12.3.2\bin\qpdf.exe"
+        get_qpdf_path._cached = path
+    return get_qpdf_path._cached
 
 
 # ========== 图标字体检测与加载 ==========
