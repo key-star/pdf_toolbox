@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-打包脚本 - 将qpdf和pdf_rotate_tool打包成单个可执行文件
+打包脚本 - 将qpdf和PDF工具箱打包成单个可执行文件
 
 特性:
   - 自动检测本地 qpdf，支持缓存，避免重复下载
