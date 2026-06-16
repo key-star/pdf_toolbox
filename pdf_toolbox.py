@@ -421,18 +421,18 @@ class PdfToolApp:
         main.pack(fill='both', expand=True)
 
         # --- 左侧导航栏 ---
-        nav_frame = ttk.Frame(main, width=140)
+        nav_frame = ttk.Frame(main, width=170)
         nav_frame.pack(side='left', fill='y')
         nav_frame.pack_propagate(False)
 
         # 导航栏背景（白色清新风格）
-        nav_inner = tk.Frame(nav_frame, bg=NAV_BG, width=140)
+        nav_inner = tk.Frame(nav_frame, bg=NAV_BG, width=170)
         nav_inner.pack(fill='both', expand=True)
         nav_inner.pack_propagate(False)
 
         # 标题（带 Canvas 圆角矩形图标）- 固定在顶部
         title_row = tk.Frame(nav_inner, bg=NAV_BG)
-        title_row.pack(fill='x', padx=10, pady=(14, 6))
+        title_row.pack(fill='x', padx=14, pady=(14, 6))
         title_icon = tk.Canvas(title_row, width=26, height=26, bg=NAV_BG,
                                highlightthickness=0)
         title_icon.pack(side='left')
@@ -455,14 +455,14 @@ class PdfToolApp:
         tk.Frame(nav_inner, height=1, bg='#E8E8E8').pack(fill='x', padx=10, pady=(0, 8))
 
         # 可滚动的按钮区域
-        nav_canvas = tk.Canvas(nav_inner, bg=NAV_BG, highlightthickness=0, width=120)
+        nav_canvas = tk.Canvas(nav_inner, bg=NAV_BG, highlightthickness=0, width=150)
         nav_scrollbar = ttk.Scrollbar(nav_inner, orient='vertical', command=nav_canvas.yview)
         nav_scrollable = tk.Frame(nav_canvas, bg=NAV_BG)
 
         nav_scrollable.bind('<Configure>',
             lambda e: nav_canvas.configure(scrollregion=nav_canvas.bbox('all')))
         nav_canvas.create_window((0, 0), window=nav_scrollable, anchor='nw',
-                                  width=120)
+                                  width=150)
         nav_canvas.configure(yscrollcommand=nav_scrollbar.set)
 
         nav_canvas.pack(side='left', fill='both', expand=True)
@@ -492,12 +492,12 @@ class PdfToolApp:
                 if current_group is not None:
                     tk.Frame(nav_scrollable, height=4, bg=NAV_BG).pack()  # 组间距
                 tk.Label(nav_scrollable, text=group, font=(UI_FONT, 8),
-                         bg=NAV_BG, fg='#BBBBBB', anchor='w').pack(fill='x', padx=14, pady=(0, 2))
+                         bg=NAV_BG, fg='#BBBBBB', anchor='w').pack(fill='x', padx=16, pady=(0, 2))
                 current_group = group
 
             # 使用容器确保图标对齐
             btn = tk.Frame(nav_scrollable, bg=NAV_BG, cursor='hand2')
-            btn.pack(fill='x', padx=6, pady=1)
+            btn.pack(fill='x', padx=8, pady=1)
             
             # Canvas 图形图标（24x24）
             icon_canvas = tk.Canvas(btn, width=24, height=24, bg=NAV_BG,
