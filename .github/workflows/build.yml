@@ -29,7 +29,20 @@ jobs:
       - name: 打包 EXE
         env:
           QPDF_VERSION: "12.3.2"
+          PYTHONIOENCODING: utf-8
         run: python build_exe.py --no-pause
+
+      - name: 调试 - 列出 dist 目录
+        if: always()
+        run: |
+          echo "=== 检查 dist 目录 ==="
+          if (Test-Path dist) { Get-ChildItem -Recurse dist } else { echo "dist 目录不存在" }
+          echo "=== 检查当前目录 ==="
+          Get-ChildItem -Directory | Select-Object Name
+          echo "=== 检查 qpdf_temp 目录 ==="
+          if (Test-Path qpdf_temp) { Get-ChildItem qpdf_temp } else { echo "qpdf_temp 不存在" }
+          echo "=== 检查 qpdf_cache 目录 ==="
+          if (Test-Path qpdf_cache) { Get-ChildItem -Recurse qpdf_cache } else { echo "qpdf_cache 不存在" }
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
