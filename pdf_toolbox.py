@@ -57,34 +57,55 @@ NAV_FG_ACTIVE = '#1A73E8'   # 选中文字颜色：Google蓝
 TITLE_BG = '#FFFFFF'        # 标题栏背景
 ACCENT_COLOR = '#1A73E8'    # 主题强调色
 
+def _qpdf_bin_name():
+    """返回当前平台 qpdf 可执行文件名"""
+    return 'qpdf.exe' if sys.platform == 'win32' else 'qpdf'
+
+
 def _search_qpdf():
-    """搜索系统中可用的 qpdf.exe"""
+    """搜索系统中可用的 qpdf"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    qpdf_bin = _qpdf_bin_name()
 
     search_paths = [
-        # 打包后的捆绑目录（PyInstaller 单文件夹模式）
-        lambda: os.path.join(os.path.dirname(sys.executable), 'qpdf', 'qpdf.exe') if getattr(sys, 'frozen', False) else None,
-        # PyInstaller 将数据放在 _internal/ 下（PyInstaller 6+）
-        lambda: os.path.join(os.path.dirname(sys.executable), '_internal', 'qpdf', 'qpdf.exe') if getattr(sys, 'frozen', False) else None,
-        # PyInstaller 单文件模式的临时解压目录
-        lambda: os.path.join(sys._MEIPASS, 'qpdf', 'qpdf.exe') if hasattr(sys, '_MEIPASS') else None,
-        # 脚本所在目录的上级（如 E:\workspace\HomemadeTools\qpdf-12.3.2-msvc64）
-        lambda: os.path.join(os.path.dirname(script_dir), f'qpdf-12.3.2-msvc64', 'bin', 'qpdf.exe'),
-        # 脚本所在目录
-        lambda: os.path.join(script_dir, f'qpdf-12.3.2-msvc64', 'bin', 'qpdf.exe'),
-        # Program Files
-        r"C:\Program Files\qpdf 12.3.2\bin\qpdf.exe",
-        r"C:\Program Files\qpdf\bin\qpdf.exe",
-        r"C:\qpdf-12.3.2-msvc64\bin\qpdf.exe",
-        r"D:\qpdf-12.3.2-msvc64\bin\qpdf.exe",
-        # qpdf_cache（build_exe.py 下载缓存）
-        lambda: next(
-            (os.path.join(root, 'qpdf.exe')
-             for root, _, files in os.walk(os.path.join(script_dir, 'qpdf_cache'))
-             if 'qpdf.exe' in files),
-            None
-        ),
+        # === 打包后的捆绑目录 ===
+        lambda: os.path.join(os.path.dirname(sys.executable), 'qpdf', qpdf_bin) if getattr(sys, 'frozen', False) else None,
+        lambda: os.path.join(os.path.dirname(sys.executable), '_internal', 'qpdf', qpdf_bin) if getattr(sys, 'frozen', False) else None,
+        lambda: os.path.join(sys._MEIPASS, 'qpdf', qpdf_bin) if hasattr(sys, '_MEIPASS') else None,
     ]
+
+    # === 脚本附近目录（开发/构建时使用）===
+    for dir_name in [f'qpdf-12.3.2-msvc64', f'qpdf-12.3.2-linux-x86_64']:
+        search_paths.append(lambda dn=dir_name: os.path.join(os.path.dirname(script_dir), dn, 'bin', qpdf_bin))
+        search_paths.append(lambda dn=dir_name: os.path.join(script_dir, dn, 'bin', qpdf_bin))
+
+    # === 系统安装路径 ===
+    if sys.platform == 'win32':
+        search_paths.extend([
+            r"C:\Program Files\qpdf 12.3.2\bin\qpdf.exe",
+            r"C:\Program Files\qpdf\bin\qpdf.exe",
+            r"C:\qpdf-12.3.2-msvc64\bin\qpdf.exe",
+            r"D:\qpdf-12.3.2-msvc64\bin\qpdf.exe",
+        ])
+    elif sys.platform == 'darwin':
+        search_paths.extend([
+            "/usr/local/bin/qpdf",
+            "/opt/homebrew/bin/qpdf",
+            "/opt/local/bin/qpdf",
+        ])
+    else:  # Linux / UOS
+        search_paths.extend([
+            "/usr/bin/qpdf",
+            "/usr/local/bin/qpdf",
+        ])
+
+    # === build_exe.py 下载缓存 ===
+    search_paths.append(lambda: next(
+        (os.path.join(root, qpdf_bin)
+         for root, _, files in os.walk(os.path.join(script_dir, 'qpdf_cache'))
+         if qpdf_bin in files),
+        None
+    ))
 
     for entry in search_paths:
         path = entry() if callable(entry) else entry
@@ -94,7 +115,7 @@ def _search_qpdf():
 
 
 def get_qpdf_path():
-    """查找可用的 qpdf.exe，找到后缓存结果"""
+    """查找可用的 qpdf，找到后缓存结果"""
     if not hasattr(get_qpdf_path, '_cached'):
         path = _search_qpdf()
         if not path:

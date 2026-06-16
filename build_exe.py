@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 打包脚本 - 将qpdf和PDF工具箱打包成单个可执行文件
+支持 Windows / macOS / Linux
 
 特性:
   - 自动检测本地 qpdf，支持缓存，避免重复下载
@@ -29,6 +30,31 @@ import platform
 import zipfile
 import glob
 
+# ==================== 平台检测 ====================
+
+SYSTEM = platform.system()  # Windows / Darwin / Linux
+MACHINE = platform.machine().lower()  # AMD64 / arm64 / x86_64
+
+IS_WIN = SYSTEM == 'Windows'
+IS_MAC = SYSTEM == 'Darwin'
+IS_LINUX = SYSTEM == 'Linux'
+
+if IS_WIN:
+    QPDF_BIN = 'qpdf.exe'
+    ADD_DATA_SEP = ';'
+    QPDF_ARCHIVE = 'qpdf-{version}-msvc64.zip'
+    QPDF_DIR_NAME = 'qpdf-{version}-msvc64'
+elif IS_MAC:
+    QPDF_BIN = 'qpdf'
+    ADD_DATA_SEP = ':'
+    QPDF_ARCHIVE = None  # macOS 无预编译二进制，使用 Homebrew
+    QPDF_DIR_NAME = 'qpdf-{version}'
+else:  # Linux
+    QPDF_BIN = 'qpdf'
+    ADD_DATA_SEP = ':'
+    QPDF_ARCHIVE = 'qpdf-{version}-bin-linux-x86_64.zip'
+    QPDF_DIR_NAME = 'qpdf-{version}-linux-x86_64'
+
 # ==================== 配置 ====================
 
 QPDF_VERSION = os.environ.get("QPDF_VERSION", "12.3.2")
@@ -39,35 +65,71 @@ SCRIPT = os.path.join(BASE_DIR, "pdf_toolbox.py")
 FA_TTF = os.path.join(BASE_DIR, "fa-solid-900.ttf")
 OUTPUT_NAME = "PDF_Toolbox"
 
-# 缓存目录（下载的 qpdf 解压后放这里，后续直接复用）
 CACHE_DIR = os.path.join(BASE_DIR, "qpdf_cache")
-# 打包时用于临时存放 bin 的目录（避免复整个 qpdf 导致路径过长）
 TEMP_QPDF_DIR = os.path.join(BASE_DIR, "qpdf_temp")
-
-# 常见 qpdf 安装路径（按优先级，带 %s 的会被替换为版本号）
-DEFAULT_SEARCH_PATHS = [
-    r"C:\Program Files\qpdf %s\bin\qpdf.exe",
-    r"C:\Program Files\qpdf\bin\qpdf.exe",
-    r"C:\qpdf-%s-msvc64\bin\qpdf.exe",
-    r"D:\qpdf-%s-msvc64\bin\qpdf.exe",
-    # 自动扫描脚本所在目录的上一级（方便本项目的目录结构）
-    lambda: os.path.join(
-        os.path.dirname(BASE_DIR), f"qpdf-{QPDF_VERSION}-msvc64", "bin", "qpdf.exe"
-    ),
-    # 也扫描一下 BASE_DIR 本身
-    lambda: os.path.join(BASE_DIR, f"qpdf-{QPDF_VERSION}-msvc64", "bin", "qpdf.exe"),
-]
 
 # GitHub Release 下载地址
 QPDF_DOWNLOAD_URL = (
     "https://github.com/qpdf/qpdf/releases/download/v{version}/"
-    "qpdf-{version}-msvc64.zip"
+    "{archive}"
 )
 
 FONT_DOWNLOAD_URL = (
     "https://raw.githubusercontent.com/FortAwesome/"
     "Font-Awesome/6.x/webfonts/fa-solid-900.ttf"
 )
+
+
+def _qpdf_archive():
+    """返回当前平台对应的 qpdf 压缩包文件名"""
+    return QPDF_ARCHIVE.format(version=QPDF_VERSION) if QPDF_ARCHIVE else None
+
+
+def _qpdf_dir_name():
+    """返回当前平台对应的 qpdf 目录名"""
+    return QPDF_DIR_NAME.format(version=QPDF_VERSION)
+
+
+# ==================== 搜索路径（按平台） ====================
+
+def _build_search_paths():
+    """构建平台相关的 qpdf 搜索路径"""
+    paths = []
+
+    if IS_WIN:
+        paths.extend([
+            r"C:\Program Files\qpdf %s\bin\%s" % (QPDF_VERSION, QPDF_BIN),
+            r"C:\Program Files\qpdf %s\bin\%s" % ("", QPDF_BIN),
+            r"C:\Program Files\qpdf\bin\%s" % QPDF_BIN,
+            r"C:\qpdf-%s-msvc64\bin\%s" % (QPDF_VERSION, QPDF_BIN),
+            r"D:\qpdf-%s-msvc64\bin\%s" % (QPDF_VERSION, QPDF_BIN),
+        ])
+    elif IS_MAC:
+        # Homebrew (Intel)
+        paths.append("/usr/local/bin/%s" % QPDF_BIN)
+        # Homebrew (Apple Silicon)
+        paths.append("/opt/homebrew/bin/%s" % QPDF_BIN)
+        # MacPorts
+        paths.append("/opt/local/bin/%s" % QPDF_BIN)
+    else:  # Linux
+        paths.extend([
+            "/usr/bin/%s" % QPDF_BIN,
+            "/usr/local/bin/%s" % QPDF_BIN,
+        ])
+
+    # 通用：脚本上级目录 / 同级目录
+    dir_name = _qpdf_dir_name()
+    paths.append(lambda: os.path.join(os.path.dirname(BASE_DIR), dir_name, "bin", QPDF_BIN))
+    paths.append(lambda: os.path.join(BASE_DIR, dir_name, "bin", QPDF_BIN))
+
+    return paths
+
+
+def _find_qpdf_bin_in_dir(root_dir):
+    """在目录中递归查找 qpdf 可执行文件"""
+    for f in glob.glob(os.path.join(root_dir, "**", QPDF_BIN), recursive=True):
+        return f
+    return None
 
 
 # ==================== 工具函数 ====================
@@ -77,32 +139,19 @@ def log(msg):
 
 
 def find_qpdf():
-    """查找已安装的 qpdf.exe，返回路径或 None"""
+    """查找已安装的 qpdf，返回完整路径或 None"""
     if QPDF_DIR_ENV:
-        path = os.path.join(QPDF_DIR_ENV, "bin", "qpdf.exe")
+        path = os.path.join(QPDF_DIR_ENV, "bin", QPDF_BIN)
         if os.path.isfile(path):
             log(f"找到 qpdf (来自环境变量): {path}")
             return path
         log(f"环境变量 QPDF_DIR 指向的路径无效: {path}")
 
-    # 搜索常见安装路径
-    for entry in DEFAULT_SEARCH_PATHS:
+    for entry in _build_search_paths():
         if callable(entry):
             path = entry()
-            if os.path.isfile(path):
+            if path and os.path.isfile(path):
                 log(f"找到 qpdf (自动扫描): {path}")
-                return path
-            continue
-        # 带 %s 的路径：先替换版本号，再试空版本
-        if "%s" in entry:
-            path = entry % QPDF_VERSION
-            if os.path.isfile(path):
-                log(f"找到 qpdf (默认路径): {path}")
-                return path
-            path = entry % ""
-            path = path.replace("  ", " ").strip()
-            if os.path.isfile(path):
-                log(f"找到 qpdf (默认路径): {path}")
                 return path
         else:
             if os.path.isfile(entry):
@@ -113,16 +162,16 @@ def find_qpdf():
 
 
 def find_cached_qpdf():
-    """在缓存目录中查找已下载的 qpdf，返回 bin 目录路径或 None"""
-    pattern = os.path.join(CACHE_DIR, f"qpdf-{QPDF_VERSION}-msvc64", "bin", "qpdf.exe")
-    if os.path.isfile(pattern):
-        log(f"找到缓存的 qpdf: {pattern}")
-        return pattern
-    # 也直接搜 CACHE_DIR/**/qpdf.exe
-    for f in glob.glob(os.path.join(CACHE_DIR, "**", "qpdf.exe"), recursive=True):
-        log(f"找到缓存的 qpdf: {f}")
-        return f
-    return None
+    """在缓存目录中查找 qpdf，返回完整路径或 None"""
+    cache_dir = os.path.join(CACHE_DIR, _qpdf_dir_name(), "bin", QPDF_BIN)
+    if os.path.isfile(cache_dir):
+        log(f"找到缓存的 qpdf: {cache_dir}")
+        return cache_dir
+    # 递归搜索
+    result = _find_qpdf_bin_in_dir(CACHE_DIR)
+    if result:
+        log(f"找到缓存的 qpdf: {result}")
+    return result
 
 
 def download_file(url, dest, desc="文件"):
@@ -153,20 +202,48 @@ def download_file(url, dest, desc="文件"):
         return False
 
 
+def extract_zip(zip_path, dest_dir):
+    """解压 zip 文件并处理嵌套目录"""
+    log("正在解压...")
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            zf.extractall(dest_dir)
+        # 如果解压后多一层目录，展平
+        items = os.listdir(dest_dir)
+        if len(items) == 1 and os.path.isdir(os.path.join(dest_dir, items[0])):
+            inner = os.path.join(dest_dir, items[0])
+            for item in os.listdir(inner):
+                shutil.move(os.path.join(inner, item), os.path.join(dest_dir, item))
+            os.rmdir(inner)
+        return True
+    except Exception as e:
+        log(f"解压失败: {e}")
+        return False
+
+
 def download_and_cache_qpdf():
-    """下载 qpdf 并缓存到本地"""
-    cache_subdir = os.path.join(CACHE_DIR, f"qpdf-{QPDF_VERSION}-msvc64")
-    qpdf_exe = os.path.join(cache_subdir, "bin", "qpdf.exe")
-    if os.path.isfile(qpdf_exe):
+    """下载 qpdf 并缓存到本地（Windows/Linux）；macOS 需通过 Homebrew 安装）"""
+    if IS_MAC:
+        log("macOS 平台：请先通过 Homebrew 安装 qpdf")
+        log("  brew install qpdf")
+        log("或设置 QPDF_DIR 环境变量指向 qpdf 安装目录")
+        return None
+
+    cache_subdir = os.path.join(CACHE_DIR, _qpdf_dir_name())
+    qpdf_path = os.path.join(cache_subdir, "bin", QPDF_BIN)
+    if os.path.isfile(qpdf_path):
         log("qpdf 已缓存，跳过下载")
         return cache_subdir
 
-    zip_path = os.path.join(CACHE_DIR, f"qpdf-{QPDF_VERSION}-msvc64.zip")
-    url = QPDF_DOWNLOAD_URL.format(version=QPDF_VERSION)
+    archive_name = _qpdf_archive()
+    if not archive_name:
+        return None
 
-    if not download_file(url, zip_path, f"qpdf v{QPDF_VERSION}"):
-        log("下载失败，尝试从国内镜像下载...")
-        # 可配置国内镜像源
+    zip_path = os.path.join(CACHE_DIR, archive_name)
+    url = QPDF_DOWNLOAD_URL.format(version=QPDF_VERSION, archive=archive_name)
+
+    if not download_file(url, zip_path, f"qpdf v{QPDF_VERSION} ({SYSTEM})"):
+        log("下载失败，尝试使用国内镜像...")
         fallback_urls = [
             f"https://mirror.ghproxy.com/{url}",
         ]
@@ -179,30 +256,17 @@ def download_and_cache_qpdf():
             log("下载地址: " + url)
             return None
 
-    # 解压
-    log("正在解压...")
-    try:
-        with zipfile.ZipFile(zip_path, 'r') as zf:
-            zf.extractall(cache_subdir)
-        # 如果解压后多一层目录，调整一下
-        items = os.listdir(cache_subdir)
-        if len(items) == 1 and os.path.isdir(os.path.join(cache_subdir, items[0])):
-            inner = os.path.join(cache_subdir, items[0])
-            for item in os.listdir(inner):
-                shutil.move(os.path.join(inner, item), os.path.join(cache_subdir, item))
-            os.rmdir(inner)
-    except Exception as e:
-        log(f"解压失败: {e}")
+    if not extract_zip(zip_path, cache_subdir):
         shutil.rmtree(cache_subdir, ignore_errors=True)
         return None
-    finally:
-        os.remove(zip_path)
 
-    if os.path.isfile(qpdf_exe):
+    os.remove(zip_path)
+
+    if os.path.isfile(qpdf_path):
         log(f"qpdf 已缓存到: {cache_subdir}")
         return cache_subdir
     else:
-        log("解压后未找到 qpdf.exe，缓存可能不完整")
+        log("解压后未找到 qpdf，缓存可能不完整")
         return None
 
 
@@ -211,42 +275,34 @@ def ensure_font():
     if os.path.isfile(FA_TTF):
         log(f"字体文件已存在: {FA_TTF}")
         return True
-
     log("Font Awesome 字体未找到，正在下载...")
     return download_file(FONT_DOWNLOAD_URL, FA_TTF, "fa-solid-900.ttf")
 
 
 def build():
     """执行 PyInstaller 打包"""
-    # 清理之前的临时 qpdf
     if os.path.exists(TEMP_QPDF_DIR):
         shutil.rmtree(TEMP_QPDF_DIR)
 
-    # 获取 qpdf bin 目录
-    qpdf_bin_dir = None
+    # 获取 qpdf 路径
+    qpdf_path = find_qpdf() or find_cached_qpdf()
 
-    qpdf_exe = find_qpdf()
-    if qpdf_exe:
-        qpdf_bin_dir = os.path.dirname(qpdf_exe)
-    else:
-        qpdf_exe = find_cached_qpdf()
-        if qpdf_exe:
-            qpdf_bin_dir = os.path.dirname(qpdf_exe)
-        else:
-            log("未找到本地 qpdf，正在下载并缓存...")
-            cache_dir = download_and_cache_qpdf()
-            if cache_dir:
-                qpdf_bin_dir = os.path.join(cache_dir, "bin")
+    if not qpdf_path:
+        log("未找到本地 qpdf，正在下载并缓存...")
+        cache_dir = download_and_cache_qpdf()
+        if cache_dir:
+            qpdf_path = os.path.join(cache_dir, "bin", QPDF_BIN)
 
-    if not qpdf_bin_dir or not os.path.isdir(qpdf_bin_dir):
+    if not qpdf_path or not os.path.isfile(qpdf_path):
         log("错误: 无法获取 qpdf，打包终止")
         sys.exit(1)
 
-    log(f"使用 qpdf 目录: {qpdf_bin_dir}")
+    log(f"使用 qpdf: {qpdf_path}")
 
-    # 复制 bin 目录到临时位置（避免路径过长）
-    log(f"正在复制 qpdf bin: {qpdf_bin_dir} -> {TEMP_QPDF_DIR}")
-    shutil.copytree(qpdf_bin_dir, TEMP_QPDF_DIR)
+    # 复制 qpdf 根目录（包含 bin/ 和 lib/）到临时位置
+    qpdf_root = os.path.dirname(os.path.dirname(qpdf_path))
+    log(f"正在复制 qpdf: {qpdf_root} -> {TEMP_QPDF_DIR}")
+    shutil.copytree(qpdf_root, TEMP_QPDF_DIR)
 
     # 构建 PyInstaller 命令
     cmd = [
@@ -254,28 +310,32 @@ def build():
         "--noconfirm",
         "--windowed",
         "--name", OUTPUT_NAME,
-        "--add-data", f"{TEMP_QPDF_DIR};qpdf",
+        "--add-data", f"{TEMP_QPDF_DIR}{ADD_DATA_SEP}qpdf",
         "--hidden-import", "ttkbootstrap",
         "--hidden-import", "PIL",
         "--collect-all", "ttkbootstrap",
     ]
 
-    # 如果有字体文件，打包进去
     if os.path.isfile(FA_TTF):
-        cmd.extend(["--add-data", f"{FA_TTF};."])
+        cmd.extend(["--add-data", f"{FA_TTF}{ADD_DATA_SEP}."])
 
     cmd.append(SCRIPT)
 
     log(f"正在打包: {' '.join(cmd)}")
     result = subprocess.run(cmd)
 
-    # 清理临时 qpdf
     if os.path.exists(TEMP_QPDF_DIR):
         shutil.rmtree(TEMP_QPDF_DIR)
 
     if result.returncode == 0:
-        log(f"\n打包成功！可执行文件在: dist/{OUTPUT_NAME}/{OUTPUT_NAME}.exe")
-        log("可将 dist/PDF_Toolbox 整个文件夹分发给其他人使用")
+        if IS_WIN:
+            log(f"\n打包成功！可执行文件在: dist/{OUTPUT_NAME}/{OUTPUT_NAME}.exe")
+        elif IS_MAC:
+            log(f"\n打包成功！应用在: dist/{OUTPUT_NAME}.app/")
+            log("或 one-folder 模式: dist/PDF_Toolbox/")
+        else:
+            log(f"\n打包成功！可执行文件在: dist/{OUTPUT_NAME}/{OUTPUT_NAME}")
+        log("可将输出目录分发给其他人使用")
     else:
         log("\n打包失败，请检查错误信息")
         sys.exit(1)
@@ -286,13 +346,10 @@ def main():
 
     log("=" * 50)
     log(f"PDF工具箱 打包脚本 (qpdf v{QPDF_VERSION})")
-    log(f"系统: {platform.system()} {platform.release()}")
+    log(f"系统: {SYSTEM} {platform.machine()} {platform.release()}")
     log("=" * 50)
 
-    # 确保字体
     ensure_font()
-
-    # 执行打包
     build()
 
     if not no_pause:
