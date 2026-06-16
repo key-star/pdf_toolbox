@@ -37,7 +37,7 @@ QPDF_DIR_ENV = os.environ.get("QPDF_DIR", "")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(BASE_DIR, "pdf_rotate_tool.py")
 FA_TTF = os.path.join(BASE_DIR, "fa-solid-900.ttf")
-OUTPUT_NAME = "PDF工具箱"
+OUTPUT_NAME = "PDF_Toolbox"
 
 # 缓存目录（下载的 qpdf 解压后放这里，后续直接复用）
 CACHE_DIR = os.path.join(BASE_DIR, "qpdf_cache")
@@ -275,7 +275,7 @@ def build():
 
     if result.returncode == 0:
         log(f"\n打包成功！可执行文件在: dist/{OUTPUT_NAME}/{OUTPUT_NAME}.exe")
-        log(f"可将 dist/{OUTPUT_NAME} 整个文件夹分发给其他人使用")
+        log("可将 dist/PDF_Toolbox 整个文件夹分发给其他人使用")
     else:
         log("\n打包失败，请检查错误信息")
         sys.exit(1)
