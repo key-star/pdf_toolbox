@@ -35,7 +35,7 @@ QPDF_VERSION = os.environ.get("QPDF_VERSION", "12.3.2")
 QPDF_DIR_ENV = os.environ.get("QPDF_DIR", "")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SCRIPT = os.path.join(BASE_DIR, "pdf_rotate_tool.py")
+SCRIPT = os.path.join(BASE_DIR, "pdf_toolbox.py")
 FA_TTF = os.path.join(BASE_DIR, "fa-solid-900.ttf")
 OUTPUT_NAME = "PDF_Toolbox"
 
