@@ -16,9 +16,19 @@ import tkinter.font as tkfont
 import subprocess
 import os
 import sys
+import json
 
 # 默认 qpdf 路径（会被 get_qpdf_path 自动搜索覆盖）
 QPDF_PATH = ""
+
+# 配置持久化目录
+if sys.platform == 'win32':
+    _CONFIG_DIR = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'PDF工具箱')
+elif sys.platform == 'darwin':
+    _CONFIG_DIR = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', 'PDF工具箱')
+else:
+    _CONFIG_DIR = os.path.join(os.path.expanduser('~'), '.config', 'PDF工具箱')
+_CONFIG_FILE = os.path.join(_CONFIG_DIR, 'config.json')
 
 # 导航项定义: (key, label, icon_color, icon_bg, group)
 # icon_color: 图形颜色; icon_bg: 圆角矩形浅底色
@@ -320,15 +330,51 @@ class PdfToolApp:
     def __init__(self, root):
         self.root = root
         self.root.title("PDF工具箱")
-        self.root.geometry("780x560")
+        self._config = self._load_config()
+        geom = self._config.get('geometry', '780x560')
+        self.root.geometry(geom)
         self.root.resizable(True, True)
         self.root.minsize(720, 500)
+        if self._config.get('maximized'):
+            self.root.state('zoomed')
 
         self.qpdf_path = get_qpdf_path()
         self._nav_buttons = {}
         self._pages = {}
+        self._resize_timer = None
         _detect_icon_font()  # 在 Tk 实例存在后检测图标字体
+        self._bind_resize_save()
         self._build_ui()
+
+    # ==================== 配置持久化 ====================
+    def _load_config(self):
+        try:
+            if os.path.isfile(_CONFIG_FILE):
+                with open(_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return {}
+
+    def _save_config(self):
+        try:
+            os.makedirs(_CONFIG_DIR, exist_ok=True)
+            geom = self.root.winfo_geometry()
+            self._config['geometry'] = geom.split('+')[0]
+            self._config['maximized'] = self.root.state() == 'zoomed'
+            with open(_CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self._config, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _bind_resize_save(self):
+        def _on_resize(event):
+            if event.widget == self.root:
+                if self._resize_timer:
+                    self.root.after_cancel(self._resize_timer)
+                self._resize_timer = self.root.after(500, self._save_config)
+        self.root.bind('<Configure>', _on_resize, add='+')
+        self.root.protocol('WM_DELETE_WINDOW', lambda: (self._save_config(), self.root.destroy()))
 
     # ==================== UI 构建 ====================
     def _build_ui(self):
