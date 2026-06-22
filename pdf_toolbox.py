@@ -18,6 +18,9 @@ import os
 import sys
 import json
 import shutil
+from logger import get_logger
+
+log = get_logger()
 
 # 默认 qpdf 路径（会被 get_qpdf_path 自动搜索覆盖）
 QPDF_PATH = ""
@@ -380,12 +383,14 @@ class PdfToolApp:
             self.root.state('zoomed')
 
         self.qpdf_path = get_qpdf_path()
+        log.info(f"qpdf路径: {self.qpdf_path}")
         self._nav_buttons = {}
         self._pages = {}
         self._resize_timer = None
         _detect_icon_font()  # 在 Tk 实例存在后检测图标字体
         self._bind_resize_save()
         self._build_ui()
+        log.info("程序启动完成")
 
     # ==================== 配置持久化 ====================
     def _load_config(self):
@@ -592,10 +597,18 @@ class PdfToolApp:
 
         # 状态栏
         self.status_var = ttk.StringVar(value="就绪")
-        status_bar = ttk.Label(self.root, textvariable=self.status_var,
+        status_bar_frame = ttk.Frame(self.root)
+        status_bar_frame.pack(fill='x', side='bottom')
+        status_bar = ttk.Label(status_bar_frame, textvariable=self.status_var,
                                bootstyle=(LIGHT, INVERSE),
                                anchor='w', padding=(10, 4))
-        status_bar.pack(fill='x', side='bottom')
+        status_bar.pack(side='left', fill='x', expand=True)
+        btn_pad = ttk.Frame(status_bar_frame)
+        btn_pad.pack(side='right', padx=(0, 16), pady=(4, 8))
+        ttk.Button(btn_pad, text="导出日志", command=self._export_log,
+                   bootstyle=INFO, width=8).pack(side='right', padx=(4, 0))
+        ttk.Button(btn_pad, text="查看日志", command=self._open_log,
+                   bootstyle=INFO, width=8).pack(side='right', padx=(4, 0))
 
     def _on_nav_hover(self, btn, icon_canvas, text_lbl, entering):
         """导航按钮悬停效果"""
@@ -613,6 +626,8 @@ class PdfToolApp:
 
     def _switch_page(self, key):
         """切换页面"""
+        label = dict([(k, l) for k, l, _, _, _ in NAV_ITEMS]).get(key, key)
+        log.info(f"切换页面: {label}")
         # 更新导航按钮状态
         for k, (btn, icon_canvas, text_lbl) in self._nav_buttons.items():
             if k == key:
@@ -730,6 +745,8 @@ class PdfToolApp:
 
     def _merge_add(self):
         paths = filedialog.askopenfilenames(title="选择PDF文件", filetypes=[("PDF文件", "*.pdf")])
+        if paths:
+            log.info(f"合并-添加文件: {len(paths)} 个")
         for p in paths:
             self.merge_files.append(p)
             self.merge_listbox.insert('end', os.path.basename(p))
@@ -758,6 +775,7 @@ class PdfToolApp:
         self._sync_merge_output()
 
     def _merge_clear(self):
+        log.info("合并-清空文件列表")
         self.merge_files.clear()
         self.merge_listbox.delete(0, 'end')
         self._sync_merge_output()
@@ -772,6 +790,7 @@ class PdfToolApp:
         if not os.path.isfile(self.qpdf_path):
             Messagebox.show_error(f"qpdf.exe 不存在：\n{self.qpdf_path}", "错误")
             return
+        log.info(f"合并PDF: {len(self.merge_files)} 个文件 -> {self.merge_output.get()}")
         pages_args = ["--pages"] + self.merge_files + ["--"]
         cmd = [self.qpdf_path] + pages_args + [self.merge_files[0], self.merge_output.get()]
         self._run_cmd(cmd, "合并完成！")
@@ -811,6 +830,7 @@ class PdfToolApp:
             return
         angle = self.rotate_angle.get()
         pages = self.rotate_pages.get().strip()
+        log.info(f"旋转页面: {self.rotate_input.get()} 角度={angle} 页码=({pages or '全部'})")
         if pages:
             rotate_arg = f"--rotate=+{angle}:{pages}" if not angle.startswith('-') else f"--rotate={angle}:{pages}"
         else:
@@ -846,6 +866,7 @@ class PdfToolApp:
         if not pages:
             Messagebox.show_warning("请输入要提取的页码", "提示")
             return
+        log.info(f"提取页面: {self.split_input.get()} 页码={pages} -> {self.split_output.get()}")
         cmd = [self.qpdf_path, "--pages", ".", pages, "--", self.split_input.get(), self.split_output.get()]
         self._run_cmd(cmd, "提取完成！")
 
@@ -877,6 +898,7 @@ class PdfToolApp:
         if not pages:
             Messagebox.show_warning("请输入要删除的页码", "提示")
             return
+        log.info(f"删除页面: {self.delete_input.get()} 页码={pages} -> {self.delete_output.get()}")
         delete_parts = [f"r{p.strip()}" for p in pages.split(',')]
         exclude_str = ','.join(delete_parts)
         cmd = [self.qpdf_path, "--pages", ".", exclude_str, "--", self.delete_input.get(), self.delete_output.get()]
@@ -907,6 +929,8 @@ class PdfToolApp:
     def _do_decrypt(self):
         if not self._check_input_output(self.decrypt_input, self.decrypt_output):
             return
+        has_pwd = bool(self.decrypt_password.get().strip())
+        log.info(f"解密PDF: {self.decrypt_input.get()}" + (" (有密码)" if has_pwd else ""))
         cmd = [self.qpdf_path, "--decrypt"]
         pwd = self.decrypt_password.get().strip()
         if pwd:
@@ -960,6 +984,7 @@ class PdfToolApp:
             Messagebox.show_warning("请至少设置打开密码或权限密码", "提示")
             return
         key_len = self.encrypt_key.get()
+        log.info(f"加密PDF: {self.encrypt_input.get()} 强度={key_len}位")
         cmd = [self.qpdf_path, "--encrypt", user_pwd, owner_pwd, key_len, "--",
                self.encrypt_input.get(), self.encrypt_output.get()]
         self._run_cmd(cmd, "加密完成！")
@@ -980,6 +1005,7 @@ class PdfToolApp:
     def _do_restrict(self):
         if not self._check_input_output(self.restrict_input, self.restrict_output):
             return
+        log.info(f"移除限制: {self.restrict_input.get()} -> {self.restrict_output.get()}")
         cmd = [self.qpdf_path, "--decrypt", self.restrict_input.get(), self.restrict_output.get()]
         self._run_cmd(cmd, "限制已移除！")
 
@@ -1109,6 +1135,7 @@ class PdfToolApp:
             return
 
         unit = self.pagesize_unit.get()
+        log.info(f"设置页面大小: {self.pagesize_input.get()} {w}x{h}{unit} -> {self.pagesize_output.get()}")
         factor = {"mm": 2.835, "cm": 28.35, "in": 72, "pt": 1}
         w_pt = float(w) * factor[unit]
         h_pt = float(h) * factor[unit]
@@ -1180,6 +1207,7 @@ class PdfToolApp:
         if not self.attach_file.get() or not os.path.isfile(self.attach_file.get()):
             Messagebox.show_warning("请选择要添加的附件文件", "提示")
             return
+        log.info(f"添加附件: {self.attach_file.get()} -> {self.attach_input.get()}")
         cmd = [self.qpdf_path, "--add-attachment", self.attach_file.get(),
                "--", self.attach_input.get(), self.attach_output.get()]
         self._run_cmd(cmd, "附件添加完成！")
@@ -1187,6 +1215,7 @@ class PdfToolApp:
     def _do_list_attach(self):
         if not self._check_input(self.attach_input):
             return
+        log.info(f"列出附件: {self.attach_input.get()}")
         cmd = [self.qpdf_path, "--list-attachments", self.attach_input.get()]
         self._run_show_cmd(cmd, self.attach_text)
 
@@ -1212,12 +1241,14 @@ class PdfToolApp:
     def _do_repair(self):
         if not self._check_input_output(self.repair_input, self.repair_output):
             return
+        log.info(f"修复PDF: {self.repair_input.get()} -> {self.repair_output.get()}")
         cmd = [self.qpdf_path, self.repair_input.get(), self.repair_output.get()]
         self._run_cmd(cmd, "修复完成！")
 
     def _do_repair_deep(self):
         if not self._check_input_output(self.repair_input, self.repair_output):
             return
+        log.info(f"深度修复PDF: {self.repair_input.get()} -> {self.repair_output.get()}")
         cmd = [self.qpdf_path, "--qdf", self.repair_input.get(), self.repair_output.get()]
         self._run_cmd(cmd, "深度修复完成！")
 
@@ -1443,11 +1474,13 @@ class PdfToolApp:
             return
 
         n = len(self.print_files)
+        log.info(f"批量打印: {n} 个文件, 打印机={printer}")
         result = Messagebox.yesno(
             f"确认要打印 {n} 个文件吗？\n打印机：{printer}",
             "确认打印"
         )
         if not result:
+            log.info("打印已取消")
             return
 
         # Windows: 保存默认打印机，切换到用户选择的，打印完恢复
@@ -1484,6 +1517,7 @@ class PdfToolApp:
         msg = f"已发送 {success} 个文件到打印机"
         if fail > 0:
             msg += f"\n{fail} 个文件打印失败（文件不存在或无法打开）"
+        log.info(f"打印结果: 成功={success}, 失败={fail}")
         Messagebox.show_info(msg, "打印结果")
 
     # ==================== 通用方法 ====================
@@ -1494,6 +1528,7 @@ class PdfToolApp:
         )
         if path:
             var.set(path)
+            log.info(f"选择输入文件: {path}")
             # 自动设置输出文件路径（同目录 + 后缀）
             if output_var is not None and not output_var.get():
                 base, ext = os.path.splitext(path)
@@ -1509,6 +1544,7 @@ class PdfToolApp:
             if not path.lower().endswith('.pdf'):
                 path += '.pdf'
             var.set(path)
+            log.info(f"选择输出文件: {path}")
 
     def _check_input(self, input_var):
         if not input_var.get():
@@ -1538,6 +1574,7 @@ class PdfToolApp:
         return True
 
     def _run_cmd(self, cmd, success_msg):
+        log.info(f"执行命令: {' '.join(cmd)}")
         self.status_var.set("正在执行...")
         self.root.update()
         try:
@@ -1545,19 +1582,24 @@ class PdfToolApp:
                                      creationflags=_NO_WINDOW)
             if result.returncode == 0:
                 self.status_var.set(success_msg)
+                log.info(f"执行成功: {success_msg}")
                 Messagebox.show_info(success_msg, "成功", parent=self.root)
             else:
                 self.status_var.set("执行失败")
+                log.error(f"执行失败 (code={result.returncode}): {result.stderr}")
                 Messagebox.show_error(f"qpdf 执行失败：\n{result.stderr}", "失败", parent=self.root)
         except subprocess.TimeoutExpired:
             self.status_var.set("执行超时")
+            log.error(f"执行超时 (120s): {' '.join(cmd)}")
             Messagebox.show_error("qpdf 执行超时", "超时", parent=self.root)
         except Exception as e:
             self.status_var.set("执行异常")
+            log.exception(f"执行异常: {e}")
             Messagebox.show_error(str(e), "异常", parent=self.root)
 
     def _run_show_cmd(self, cmd, text_widget):
         """执行命令并将结果显示在Text控件中"""
+        log.info(f"查询命令: {' '.join(cmd)}")
         self.status_var.set("正在查询...")
         self.root.update()
         try:
@@ -1569,17 +1611,73 @@ class PdfToolApp:
             text_widget.delete('1.0', 'end')
             text_widget.insert('1.0', info)
             self.status_var.set("查询完成")
+            log.info(f"查询成功 ({len(info)} 字符)")
         except subprocess.TimeoutExpired:
             self.status_var.set("查询超时")
+            log.error(f"查询超时 (30s): {' '.join(cmd)}")
             text_widget.delete('1.0', 'end')
             text_widget.insert('1.0', "查询超时")
         except Exception as e:
             self.status_var.set("查询异常")
+            log.exception(f"查询异常: {e}")
             text_widget.delete('1.0', 'end')
             text_widget.insert('1.0', str(e))
 
+    @staticmethod
+    def _log_dir():
+        if getattr(sys, 'frozen', False):
+            return os.path.dirname(sys.executable)
+        return os.path.dirname(os.path.abspath(__file__))
+
+    def _open_log(self):
+        """用系统默认编辑器打开日志文件"""
+        log_path = os.path.join(self._log_dir(), 'app.log')
+        if not os.path.isfile(log_path):
+            Messagebox.show_info("日志文件不存在", "提示")
+            return
+        try:
+            if sys.platform == 'win32':
+                os.startfile(log_path)
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', log_path])
+            else:
+                subprocess.run(['xdg-open', log_path])
+        except Exception as e:
+            Messagebox.show_error(f"无法打开日志文件：{e}", "错误")
+
+    def _export_log(self):
+        """导出日志文件到指定位置（合并 app.log.1 + app.log）"""
+        log_dir = self._log_dir()
+        log_path = os.path.join(log_dir, 'app.log')
+        log1_path = os.path.join(log_dir, 'app.log.1')
+        if not os.path.isfile(log_path):
+            Messagebox.show_info("暂无日志可导出", "提示")
+            return
+        save_path = filedialog.asksaveasfilename(
+            title="导出日志文件",
+            defaultextension=".log",
+            filetypes=[("日志文件", "*.log"), ("文本文件", "*.txt"), ("所有文件", "*.*")],
+            initialfile="app.log"
+        )
+        if not save_path:
+            return
+        try:
+            with open(save_path, 'w', encoding='utf-8') as out:
+                if os.path.isfile(log1_path):
+                    out.write(f"# === 历史日志 (app.log.1) ===\n\n")
+                    with open(log1_path, 'r', encoding='utf-8') as f:
+                        out.write(f.read())
+                    out.write(f"\n\n# === 当前日志 (app.log) ===\n\n")
+                with open(log_path, 'r', encoding='utf-8') as f:
+                    out.write(f.read())
+            log.info(f"日志已导出: {save_path}")
+            Messagebox.show_info(f"日志已导出到：\n{save_path}", "导出成功")
+        except Exception as e:
+            Messagebox.show_error(f"导出失败：{e}", "错误")
+
 
 if __name__ == '__main__':
+    log.info(f"PDF工具箱 启动 - 系统: {sys.platform}, Python: {sys.version}")
     try:
         from ttkbootstrap import Window
     except ImportError:
@@ -1598,5 +1696,6 @@ if __name__ == '__main__':
         root.mainloop()
     except Exception as e:
         import traceback
+        log.exception(f"程序异常: {e}")
         traceback.print_exc()
         input("发生错误，按回车键退出...")
