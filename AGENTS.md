@@ -8,14 +8,14 @@ Cross-platform (Windows/macOS/Linux) Python/tkinter GUI wrapping **qpdf** for PD
 |------|---------|
 | `pdf_toolbox.py` | Main application (all logic) |
 | `pdf_toolbox.pyw` | Windows-only copy for windowed mode (no console) |
-| `build_exe.py` | PyInstaller build script (cross-platform) |
+| `build.py` | PyInstaller build script (cross-platform) |
 | `fa-solid-900.ttf` | Font Awesome icon font (bundled) |
 
 ## Dependencies
 
 - `ttkbootstrap` (tkinter Material Design theme) — `pip install ttkbootstrap`
 - `qpdf` — install per platform:
-  - Windows: `build_exe.py` auto-downloads and caches
+  - Windows: `build.py` auto-downloads and caches
   - macOS: `brew install qpdf`
   - UOS/Debian: `sudo apt install qpdf`
 - Font Awesome icons from `fa-solid-900.ttf` (falls back to system Segoe/MDL2 or Canvas-drawn icons)
@@ -32,7 +32,7 @@ Cross-platform (Windows/macOS/Linux) Python/tkinter GUI wrapping **qpdf** for PD
 1. PyInstaller-frozen: `{exe_dir}/qpdf/`, `{exe_dir}/_internal/qpdf/`, `{MEIPASS}/qpdf/`
 2. Adjacent project dirs: `../qpdf-12.3.2-msvc64/bin/`, `../qpdf-12.3.2-linux-x86_64/bin/`
 3. System paths: Program Files (Windows), Homebrew (macOS), `/usr/bin` (Linux)
-4. `qpdf_cache/` (from `build_exe.py` download)
+4. `qpdf_cache/` (from `build.py` download)
 5. `shutil.which('qpdf')` — PATH fallback
 
 ## Architecture

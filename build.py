@@ -12,7 +12,7 @@
 
 使用方法:
   1. 安装依赖:  pip install pyinstaller
-  2. 运行打包:  python build_exe.py
+   2. 运行打包:  python build.py
   3. 打包结果在 dist/ 目录
 
 环境变量:
@@ -135,7 +135,7 @@ def _find_qpdf_bin_in_dir(root_dir):
 # ==================== 工具函数 ====================
 
 def log(msg):
-    print(f"[build_exe] {msg}")
+    print(f"[build] {msg}")
 
 
 def find_qpdf():

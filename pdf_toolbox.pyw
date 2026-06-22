@@ -114,7 +114,7 @@ def _search_qpdf():
             "/usr/local/bin/qpdf",
         ])
 
-    # === build_exe.py 下载缓存 ===
+    # === build.py 下载缓存 ===
     search_paths.append(lambda: next(
         (os.path.join(root, QPDF_EXE)
          for root, _, files in os.walk(os.path.join(script_dir, 'qpdf_cache'))

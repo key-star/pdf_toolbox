@@ -57,7 +57,7 @@ jobs:
         env:
           QPDF_VERSION: "12.3.2"
           PYTHONIOENCODING: utf-8
-        run: python build_exe.py --no-pause
+        run: python build.py --no-pause
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v7
