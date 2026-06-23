@@ -50,6 +50,8 @@ jobs:
 
       - name: 安装 qpdf (macOS)
         if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_REQUIRE_TAP_TRUST: 1
         run: brew install qpdf
 
       - name: 安装 Python 依赖
