@@ -67,6 +67,7 @@ OUTPUT_NAME = "PDF_Toolbox"
 
 CACHE_DIR = os.path.join(BASE_DIR, "qpdf_cache")
 TEMP_QPDF_DIR = os.path.join(BASE_DIR, "qpdf_temp")
+TEMP_FONT_DIR = os.path.join(BASE_DIR, "font_temp")
 
 # GitHub Release 下载地址
 QPDF_DOWNLOAD_URL = (
@@ -305,6 +306,27 @@ def build():
     log(f"正在复制 qpdf: {qpdf_bin} -> {TEMP_QPDF_DIR}")
     shutil.copytree(qpdf_bin, TEMP_QPDF_DIR)
 
+    # 复制中文字体（Linux 打包用）
+    cjk_font_added = False
+    if IS_LINUX:
+        cjk_candidates = [
+            ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", "wqy-microhei.ttc"),
+            ("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", "wqy-zenhei.ttc"),
+            ("/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf", "NotoSansCJKsc-Regular.otf"),
+            ("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", "DroidSansFallbackFull.ttf"),
+            ("/usr/share/fonts/truetype/arphic/uming.ttc", "uming.ttc"),
+        ]
+        for src, name in cjk_candidates:
+            if os.path.isfile(src):
+                os.makedirs(TEMP_FONT_DIR, exist_ok=True)
+                dst = os.path.join(TEMP_FONT_DIR, name)
+                shutil.copy2(src, dst)
+                log(f"已复制中文字体: {name}")
+                cjk_font_added = True
+                break
+        if not cjk_font_added:
+            log("未找到可用的系统中文字体，将使用运行时字体检测")
+
     # 构建 PyInstaller 命令
     cmd = [
         sys.executable, "-m", "PyInstaller",
@@ -320,6 +342,11 @@ def build():
     if os.path.isfile(FA_TTF):
         cmd.extend(["--add-data", f"{FA_TTF}{ADD_DATA_SEP}."])
 
+    if cjk_font_added:
+        cjk_files = os.listdir(TEMP_FONT_DIR)
+        if cjk_files:
+            cmd.extend(["--add-data", f"{os.path.join(TEMP_FONT_DIR, cjk_files[0])}{ADD_DATA_SEP}."])
+
     cmd.append(SCRIPT)
 
     log(f"正在打包: {' '.join(cmd)}")
@@ -327,6 +354,8 @@ def build():
 
     if os.path.exists(TEMP_QPDF_DIR):
         shutil.rmtree(TEMP_QPDF_DIR)
+    if os.path.exists(TEMP_FONT_DIR):
+        shutil.rmtree(TEMP_FONT_DIR)
 
     if result.returncode == 0:
         if IS_WIN:
@@ -343,6 +372,8 @@ def build():
 
 
 def main():
+    import time
+    _start = time.time()
     no_pause = "--no-pause" in sys.argv
 
     log("=" * 50)
@@ -352,6 +383,7 @@ def main():
 
     ensure_font()
     build()
+    log(f"总耗时: {time.time() - _start:.1f} 秒")
 
     if not no_pause:
         input("按回车退出...")

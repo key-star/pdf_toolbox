@@ -17,7 +17,10 @@ import subprocess
 import os
 import sys
 import json
+import platform
+import importlib.metadata
 import shutil
+import logger
 from logger import get_logger
 
 log = get_logger()
@@ -50,6 +53,98 @@ else:
     UI_FONT_FIXED = 'Monospace'
     QPDF_EXE = 'qpdf'
     _NO_WINDOW = 0
+
+# 中文字体名称（运行时检测更新，用于 Linux 回退）
+_UI_FONT_RUNTIME = UI_FONT
+
+def _get_ui_font():
+    return _UI_FONT_RUNTIME
+
+def _detect_chinese_font():
+    global _UI_FONT_RUNTIME
+    if sys.platform in ('win32', 'darwin'):
+        return
+    try:
+        families = tkfont.families()
+        for name in ['Noto Sans CJK SC', 'Noto Sans CJK',
+                      'WenQuanYi Micro Hei', 'WenQuanYi Zen Hei',
+                      'Droid Sans Fallback', 'Source Han Sans SC',
+                      'Noto Serif CJK SC', 'AR PL UMing CN', 'AR PL UKai CN']:
+            if name in families:
+                _UI_FONT_RUNTIME = name
+                log.info(f"检测到中文字体: {name}")
+                return
+    except Exception as e:
+        log.warning(f"字体检测失败: {e}")
+
+    # 尝试加载打包捆绑的字体文件
+    try:
+        bundle_dirs = []
+        if getattr(sys, 'frozen', False):
+            bundle_dirs.append(os.path.dirname(sys.executable))
+            if hasattr(sys, '_MEIPASS'):
+                bundle_dirs.append(sys._MEIPASS)
+        for d in bundle_dirs:
+            for fname in os.listdir(d):
+                if fname.endswith(('.ttf', '.ttc', '.otf')) and fname != 'fa-solid-900.ttf':
+                    fpath = os.path.join(d, fname)
+                    _register_font(fpath)
+                    families = tkfont.families()
+                    for name in ['Noto Sans CJK SC', 'Noto Sans CJK',
+                                  'WenQuanYi Micro Hei', 'WenQuanYi Zen Hei',
+                                  'Droid Sans Fallback', 'Source Han Sans SC',
+                                  'Noto Serif CJK SC', 'AR PL UMing CN', 'AR PL UKai CN']:
+                        if name in families:
+                            _UI_FONT_RUNTIME = name
+                            log.info(f"使用捆绑字体: {fname} (注册为 {name})")
+                            return
+    except Exception:
+        pass
+
+    log.warning("未找到合适的中文字体，使用默认字体")
+
+
+def _register_font(fpath):
+    """注册字体文件到系统，供 tkinter 使用"""
+    ext = os.path.splitext(fpath)[1].lower()
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            with open(fpath, 'rb') as f:
+                data = f.read()
+            ctypes.windll.gdi32.AddFontMemResourceEx(
+                data, len(data), 0, ctypes.byref(ctypes.c_ulong(0))
+            )
+        except Exception:
+            pass
+    else:
+        try:
+            subprocess.run(['fc-cache', '-f', os.path.dirname(fpath)],
+                           capture_output=True, timeout=10)
+        except Exception:
+            pass
+
+
+def _get_os_info():
+    """返回可读的操作系统信息字符串"""
+    system = platform.system()
+    machine = platform.machine()
+    if system == 'Windows':
+        release = platform.release()
+        version = platform.version().split('.')[2] if '.' in platform.version() else ''
+        return f"Windows {release} {machine} (10.0.{version})"
+    elif system == 'Darwin':
+        ver = platform.mac_ver()[0]
+        return f"macOS {ver} {machine}"
+    else:
+        try:
+            info = platform.freedesktop_os_release()
+            distro = info.get('PRETTY_NAME', info.get('NAME', system))
+        except Exception:
+            distro = system
+        kernel = platform.release()
+        return f"{distro} {machine} (kernel {kernel})"
+
 
 # 导航项定义: (key, label, icon_color, icon_bg, group)
 # icon_color: 图形颜色; icon_bg: 圆角矩形浅底色
@@ -374,6 +469,7 @@ class PdfToolApp:
     def __init__(self, root):
         self.root = root
         self.root.title("PDF工具箱")
+        log.info("初始化 - 加载用户配置（窗口位置/大小）...")
         self._config = self._load_config()
         geom = self._config.get('geometry', '780x560')
         self.root.geometry(geom)
@@ -383,14 +479,18 @@ class PdfToolApp:
             self.root.state('zoomed')
 
         self.qpdf_path = get_qpdf_path()
-        log.info(f"qpdf路径: {self.qpdf_path}")
+        log.info(f"初始化 - qpdf 路径: {self.qpdf_path}")
         self._nav_buttons = {}
         self._pages = {}
         self._resize_timer = None
-        _detect_icon_font()  # 在 Tk 实例存在后检测图标字体
+        icon_font_result = _detect_icon_font()
+        log.info(f"初始化 - 图标字体: {icon_font_result or '无（使用 Canvas 手绘图标）'}")
+        _detect_chinese_font()
+        log.info("初始化 - 绑定窗口事件（保存窗口位置/大小到配置文件）...")
         self._bind_resize_save()
+        log.info("初始化 - 构建用户界面...")
         self._build_ui()
-        log.info("程序启动完成")
+        log.info("初始化 - 完成")
 
     # ==================== 配置持久化 ====================
     def _load_config(self):
@@ -430,7 +530,7 @@ class PdfToolApp:
 
         # --- 左侧导航栏 ---
         # 根据标题文字宽度动态计算导航栏宽度，适配不同系统/字体/DPI
-        _title_font = tk.font.Font(font=(UI_FONT, 11, 'bold'))
+        _title_font = tk.font.Font(font=(_get_ui_font(), 11, 'bold'))
         _title_px = _title_font.measure("PDF工具箱")
         _nav_width = max(140, _title_px + 26 + 32)  # 文字 + 图标 + 两侧间距
 
@@ -461,7 +561,7 @@ class PdfToolApp:
             # Fallback: 简单的 PDF 文字
             title_icon.create_text(13, 14, text="P", fill='white',
                                    font=('Arial', 11, 'bold'))
-        tk.Label(title_row, text="PDF工具箱", font=(UI_FONT, 11, 'bold'),
+        tk.Label(title_row, text="PDF工具箱", font=(_get_ui_font(), 11, 'bold'),
                  bg=NAV_BG, fg='#1A73E8').pack(side='left', padx=(6, 0))
 
         # 分隔线
@@ -540,7 +640,7 @@ class PdfToolApp:
             if group != current_group:
                 if current_group is not None:
                     tk.Frame(nav_scrollable, height=4, bg=NAV_BG).pack()  # 组间距
-                tk.Label(nav_scrollable, text=group, font=(UI_FONT, 8),
+                tk.Label(nav_scrollable, text=group, font=(_get_ui_font(), 8),
                          bg=NAV_BG, fg='#BBBBBB', anchor='w').pack(fill='x', padx=14, pady=(0, 2))
                 current_group = group
 
@@ -556,7 +656,7 @@ class PdfToolApp:
             _draw_icon(icon_canvas, key, icon_color, icon_bg)
             
             # 文字
-            text_lbl = tk.Label(btn, text=label, font=(UI_FONT, 9),
+            text_lbl = tk.Label(btn, text=label, font=(_get_ui_font(), 9),
                                bg=NAV_BG, fg=NAV_FG, anchor='w')
             text_lbl.pack(side='left', fill='x', expand=True, padx=(2, 0))
             
@@ -581,7 +681,7 @@ class PdfToolApp:
         # 蓝色左侧竖线
         tk.Frame(title_frame, width=4, bg=ACCENT_COLOR).pack(side='left', fill='y', padx=(0, 0), pady=10)
         tk.Label(title_frame, textvariable=self.page_title_var,
-                 font=(UI_FONT, 13, 'bold'),
+                 font=(_get_ui_font(), 13, 'bold'),
                  bg=TITLE_BG, fg='#333333').pack(side='left', padx=(10, 16))
         tk.Frame(title_frame, height=1, bg='#E8E8E8').pack(side='bottom', fill='x')
 
@@ -680,7 +780,7 @@ class PdfToolApp:
         row = ttk.Frame(parent)
         row.pack(fill='x', pady=5)
         ttk.Label(row, text=label, width=10, anchor='e',
-                  font=(UI_FONT, 9)).pack(side='left')
+                  font=(_get_ui_font(), 9)).pack(side='left')
         entry = ttk.Entry(row, textvariable=var)
         entry.pack(side='left', fill='x', expand=True, padx=(8, 8))
         ttk.Button(row, text="浏览...", command=browse_cmd,
@@ -697,7 +797,7 @@ class PdfToolApp:
     def _make_hint(self, parent, text):
         """创建灰色提示文字"""
         ttk.Label(parent, text=text, bootstyle=SECONDARY,
-                  font=(UI_FONT, 8),
+                  font=(_get_ui_font(), 8),
                   wraplength=560).pack(fill='x', pady=(6, 2))
 
     # ==================== 合并PDF ====================
@@ -1352,7 +1452,7 @@ class PdfToolApp:
         pf = ttk.Frame(parent)
         pf.pack(fill='x', pady=(0, 6))
         ttk.Label(pf, text="选择打印机：", width=10, anchor='e',
-                  font=(UI_FONT, 9)).pack(side='left')
+                  font=(_get_ui_font(), 9)).pack(side='left')
         self.printer_var = ttk.StringVar()
         printers = self._get_printers()
         default_printer = self._get_default_printer()
@@ -1384,7 +1484,7 @@ class PdfToolApp:
         list_frame.pack(fill='both', expand=True)
 
         self.print_listbox = tk.Listbox(list_frame, selectmode='extended',
-                                         font=(UI_FONT, 9))
+                                         font=(_get_ui_font(), 9))
         scrollbar = ttk.Scrollbar(list_frame, orient='vertical',
                                   command=self.print_listbox.yview)
         self.print_listbox.config(yscrollcommand=scrollbar.set)
@@ -1396,7 +1496,7 @@ class PdfToolApp:
 
         # 统计
         self.print_count_lbl = ttk.Label(parent, text="共 0 个文件",
-                                          font=(UI_FONT, 9),
+                                          font=(_get_ui_font(), 9),
                                           bootstyle=SECONDARY)
         self.print_count_lbl.pack(anchor='w', pady=(0, 4))
 
@@ -1676,26 +1776,104 @@ class PdfToolApp:
             Messagebox.show_error(f"导出失败：{e}", "错误")
 
 
-if __name__ == '__main__':
-    log.info(f"PDF工具箱 启动 - 系统: {sys.platform}, Python: {sys.version}")
+def main():
+    log.info(f"启动 - 操作系统: {_get_os_info()}")
+    log.info(f"启动 - Python 版本: {sys.version.split()[0]}, 解释器路径: {sys.executable}")
+    log.info(f"启动 - 界面字体: {UI_FONT}（运行时: {_get_ui_font()}）, 等宽字体: {UI_FONT_FIXED}")
+    log.info(f"启动 - 配置目录（存储窗口位置和大小）: {_CONFIG_DIR}")
+
+    # 检查 tkinter 是否可用
     try:
-        from ttkbootstrap import Window
-    except ImportError:
-        print('=' * 50)
-        print('错误：未安装 ttkbootstrap 库！')
-        print('请执行以下命令安装：')
-        print('  pip install ttkbootstrap')
-        print('=' * 50)
-        input('按回车键退出...')
+        import tkinter as tk
+        log.info(f"启动 - tkinter 版本: {tk.TkVersion}")
+    except Exception as e:
+        log.critical(f"tkinter 导入失败，程序无法启动: {e}")
+        msg = (
+            "PDF工具箱 启动失败\n\n"
+            f"错误：{e}\n\n"
+            "请安装系统依赖后重试：\n"
+            "  sudo apt install python3-tk\n\n"
+            "按回车键退出..."
+        )
+        if sys.platform == 'linux':
+            import subprocess
+            for dialog_cmd in [
+                ['zenity', '--error', '--title=PDF工具箱', '--text', msg, '--width=400'],
+                ['kdialog', '--error', msg],
+                ['xmessage', '-center', msg],
+            ]:
+                try:
+                    subprocess.run(dialog_cmd, timeout=10)
+                    break
+                except Exception:
+                    continue
+        else:
+            print(msg)
+            input()
         sys.exit(1)
 
     try:
+        from ttkbootstrap import Window
+        import ttkbootstrap as ttk
+        try:
+            tb_ver = importlib.metadata.version('ttkbootstrap')
+        except Exception:
+            tb_ver = 'unknown'
+        log.info(f"启动 - ttkbootstrap 版本: {tb_ver}")
+    except ImportError:
+        msg = "错误：未安装 ttkbootstrap 库！\n\n请执行以下命令安装：\n  pip install ttkbootstrap"
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("PDF工具箱", msg)
+        root.destroy()
+        sys.exit(1)
+
+    # 检查字体（仅 Linux）
+    if sys.platform not in ('win32', 'darwin'):
+        try:
+            import subprocess
+            result = subprocess.run(['fc-list', ':lang=zh'], capture_output=True, text=True, timeout=5)
+            log.info(f"启动 - 系统中文字体数量: {len(result.stdout.splitlines())}")
+            if 'Noto Sans CJK' not in result.stdout:
+                log.warning("未检测到 Noto Sans CJK SC 字体，将使用捆绑字体或回退字体")
+            else:
+                log.info("启动 - 已检测到 Noto Sans CJK SC")
+        except Exception as fe:
+            log.warning(f"中文字体检测异常，将使用默认字体: {fe}")
+
+    # 检查 qpdf
+    from pdf_toolbox import get_qpdf_path
+    qpdf_found = get_qpdf_path()
+    log.info(f"启动 - qpdf 路径: {qpdf_found or '未找到'}")
+    if not qpdf_found:
+        log.warning("未找到 qpdf，部分功能不可用")
+
+    try:
+        log.info("启动 - 创建主窗口...")
         root = Window(themename="cosmo", title="PDF工具箱", size=(780, 560),
                       resizable=(True, True))
+        log.info("启动 - 主窗口创建成功")
+
+        # 检查日志文件是否可写
+        if not os.path.isfile(logger._LOG_FILE):
+            from tkinter import messagebox
+            messagebox.showwarning(
+                "日志文件警告",
+                f"无法写入日志文件，请将程序移动到有写权限的目录（如桌面或下载目录）\n\n"
+                f"尝试路径：{logger._LOG_FILE}"
+            )
+
+        log.info("启动 - 初始化应用...")
         app = PdfToolApp(root)
+        log.info("启动 - 进入主循环")
         root.mainloop()
     except Exception as e:
         import traceback
-        log.exception(f"程序异常: {e}")
+        log.exception(f"启动失败: {e}")
         traceback.print_exc()
         input("发生错误，按回车键退出...")
+
+
+if __name__ == '__main__':
+    main()

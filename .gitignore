@@ -19,5 +19,8 @@ qpdf_temp/
 # 忽略 PyInstaller 自动生成的 spec 文件
 *.spec
 
+# 忽略运行时日志
+*.log
+
 # 忽略你之前提到的 qpdf 原始下载包
 qpdf-12.3.2-msvc64/

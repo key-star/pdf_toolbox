@@ -33,6 +33,7 @@ def get_logger():
     _logger = logging.getLogger('PDF_Toolbox')
     _logger.setLevel(logging.DEBUG)
 
+    _log_file_ok = True
     try:
         fh = RotatingFileHandler(
             _LOG_FILE, maxBytes=_MAX_BYTES, backupCount=_BACKUP_COUNT, encoding='utf-8'
@@ -44,11 +45,17 @@ def get_logger():
         fh.setFormatter(fmt)
         _logger.addHandler(fh)
     except Exception:
-        pass
+        _log_file_ok = False
 
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
     ch.setFormatter(logging.Formatter('%(message)s'))
     _logger.addHandler(ch)
+
+    if not _log_file_ok:
+        _logger.warning(
+            f"无法写入日志文件，请将程序移动到有写权限的目录（如桌面或下载目录）\n"
+            f"尝试路径: {_LOG_FILE}"
+        )
 
     return _logger

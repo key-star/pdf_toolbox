@@ -42,7 +42,11 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk
+          sudo apt-get install -y python3-tk fonts-wqy-microhei
+
+      - name: 清理未使用的 Homebrew tap (macOS)
+        if: runner.os == 'macOS'
+        run: brew untap aws/tap azure/bicep 2>/dev/null || true
 
       - name: 安装 qpdf (macOS)
         if: runner.os == 'macOS'
