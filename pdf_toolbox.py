@@ -23,6 +23,19 @@ import shutil
 import logger
 from logger import get_logger
 
+# Optional dependencies
+try:
+    from pdf2docx import Converter as Pdf2DocxConverter
+    _HAS_PDF2DOCX = True
+except ImportError:
+    _HAS_PDF2DOCX = False
+
+try:
+    import fitz
+    _HAS_FITZ = True
+except ImportError:
+    _HAS_FITZ = False
+
 log = get_logger()
 
 # 默认 qpdf 路径（会被 get_qpdf_path 自动搜索覆盖）
@@ -161,6 +174,8 @@ NAV_ITEMS = [
     ("summary",  "PDF概要",   "#137333", "#CEEAD6", "查看"),
     ("attach",   "附件管理",  "#B06000", "#FEF7D0", "查看"),
     ("repair",   "修复PDF",   "#C5221F", "#FCE8E6", "查看"),
+    ("pdf2word", "PDF转Word", "#8B5CF6", "#EDE9FE", "格式转换"),
+    ("pdf2image", "PDF转图片", "#EC4899", "#FCE7F3", "格式转换"),
     ("print",     "批量打印",  "#1A73E8", "#D2E3FC", "工具"),
 ]
 
@@ -259,6 +274,8 @@ _FA_ICON_CHARS = {
     'attach':   '\uf0c6',   # fa-paperclip（附件/回形针）
     'repair':   '\uf0ad',   # fa-wrench（修复/扳手）
     'print':    '\uf02f',   # fa-print（打印）
+    'pdf2word':  '\uf1c2',  # fa-file-word（Word文档）
+    'pdf2image': '\uf03e',  # fa-image（图片）
 }
 
 # 标题图标
@@ -279,6 +296,8 @@ _MDL2_ICON_CHARS = {
     'attach':   '\uE7C1',   # Link
     'repair':   '\uE90F',   # Settings
     'print':    '\uE749',   # Print
+    'pdf2word':  '\uE8A5',  # Document
+    'pdf2image': '\uEB9F',  # Photo
 }
 _MDL2_TITLE_ICON_CHAR = '\uEA90'
 
@@ -456,6 +475,21 @@ def _draw_icon(canvas, key, icon_color, icon_bg):
         _draw_rounded_rect(canvas, 18, 10, 22, 14, 1.5, fill=c, outline='')
         canvas.create_oval(9.5, 9.5, 14.5, 14.5, outline=c, width=1, fill=icon_bg)
 
+    elif key == 'pdf2word':
+        # 文档 + W 字母
+        _draw_rounded_rect(canvas, 3, 3, 21, 21, 2, outline=c, width=w, fill=icon_bg)
+        canvas.create_line(6, 8, 18, 8, fill=c, width=1)
+        canvas.create_line(6, 11, 18, 11, fill=c, width=1)
+        canvas.create_line(6, 14, 14, 14, fill=c, width=1)
+        canvas.create_text(16, 15, text="W", fill=c, font=('Arial', 7, 'bold'))
+
+    elif key == 'pdf2image':
+        # 风景画（山 + 太阳）
+        _draw_rounded_rect(canvas, 2, 2, 22, 22, 2, outline=c, width=w, fill=icon_bg)
+        canvas.create_oval(15, 3, 20, 8, fill=c, outline='')
+        canvas.create_polygon(2, 22, 8, 10, 14, 22, fill=c)
+        canvas.create_polygon(10, 22, 16, 12, 22, 22, fill=c)
+
     elif key == 'print':
         # 打印机：底部纸盒 + 上部出纸
         _draw_rounded_rect(canvas, 3, 10, 21, 20, 2, outline=c, width=w, fill=icon_bg)
@@ -488,6 +522,8 @@ class PdfToolApp:
         _detect_chinese_font()
         log.info("初始化 - 绑定窗口事件（保存窗口位置/大小到配置文件）...")
         self._bind_resize_save()
+        log.info("初始化 - 修复 Combobox 下拉箭头垂直居中...")
+        self._fix_combobox_arrow()
         log.info("初始化 - 构建用户界面...")
         self._build_ui()
         log.info("初始化 - 完成")
@@ -522,9 +558,29 @@ class PdfToolApp:
         self.root.bind('<Configure>', _on_resize, add='+')
         self.root.protocol('WM_DELETE_WINDOW', lambda: (self._save_config(), self.root.destroy()))
 
+    @staticmethod
+    def _fix_combobox_arrow():
+        """确保 Combobox 下拉箭头垂直居中"""
+        pass
+
     # ==================== UI 构建 ====================
     def _build_ui(self):
-        # 主容器
+        # 状态栏（必须在 main 之前创建和 pack，确保底部空间优先分配，不会被 main 挤占）
+        self.status_var = ttk.StringVar(value="就绪")
+        status_bar_frame = ttk.Frame(self.root)
+        status_bar_frame.pack(fill='x', side='bottom')
+        status_bar = ttk.Label(status_bar_frame, textvariable=self.status_var,
+                               bootstyle=(LIGHT, INVERSE),
+                               anchor='w', padding=(10, 4))
+        status_bar.pack(side='left', fill='x', expand=True)
+        btn_pad = ttk.Frame(status_bar_frame)
+        btn_pad.pack(side='right', padx=(0, 16), pady=(4, 8))
+        ttk.Button(btn_pad, text="导出日志", command=self._export_log,
+                   bootstyle=INFO, width=8).pack(side='right', padx=(4, 0))
+        ttk.Button(btn_pad, text="查看日志", command=self._open_log,
+                   bootstyle=INFO, width=8).pack(side='right', padx=(4, 0))
+
+        # 主容器（必须在状态栏之后 pack，fill=both + expand=True 只会填充状态栏之上的空间）
         main = ttk.Frame(self.root)
         main.pack(fill='both', expand=True)
 
@@ -685,9 +741,75 @@ class PdfToolApp:
                  bg=TITLE_BG, fg='#333333').pack(side='left', padx=(10, 16))
         tk.Frame(title_frame, height=1, bg='#E8E8E8').pack(side='bottom', fill='x')
 
-        # 页面容器
-        self.page_container = ttk.Frame(content_frame)
-        self.page_container.pack(fill='both', expand=True, padx=14, pady=10)
+        # 页面容器（可滚动，防止窗口缩小时内容被截断）
+        page_scroll_frame = ttk.Frame(content_frame)
+        page_scroll_frame.pack(fill='both', expand=True, padx=14, pady=10)
+        page_scroll_frame.grid_rowconfigure(0, weight=1)
+        page_scroll_frame.grid_columnconfigure(0, weight=1)
+        page_scroll_frame.grid_columnconfigure(1, weight=0)
+
+        page_canvas = tk.Canvas(page_scroll_frame, highlightthickness=0)
+        page_scrollbar = ttk.Scrollbar(page_scroll_frame, orient='vertical', command=page_canvas.yview)
+        self.page_container = ttk.Frame(page_canvas)
+
+        self._page_window = page_canvas.create_window(
+            (0, 0), window=self.page_container, anchor='nw'
+        )
+
+        page_canvas.configure(yscrollcommand=page_scrollbar.set)
+
+        # 刷新滚动条状态：内容不溢出时隐藏，溢出时显示
+        def _refresh_page_sbar():
+            try:
+                self.root.update_idletasks()
+                cw = page_canvas.winfo_width()
+                ch = page_canvas.winfo_height()
+                if cw < 10 or ch < 10:
+                    return
+                # 始终使用自然高度（不限制 height），通过 scrollregion 控制显示范围
+                page_canvas.itemconfigure(self._page_window, width=cw)
+                self.root.update_idletasks()
+                bbox = page_canvas.bbox('all')
+                if bbox is None:
+                    return
+                content_h = bbox[3]
+            except Exception:
+                return
+            if content_h > ch:
+                page_scrollbar.grid()
+                page_canvas.configure(scrollregion=(0, 0, cw, content_h))
+            else:
+                page_scrollbar.grid_remove()
+                page_canvas.configure(scrollregion=(0, 0, cw, ch))
+                page_canvas.yview_moveto(0)
+
+        page_canvas.bind(
+            '<Configure>',
+            lambda e: self.root.after_idle(_refresh_page_sbar)
+        )
+        self.page_container.bind(
+            '<Configure>',
+            lambda e: self.root.after_idle(_refresh_page_sbar)
+        )
+
+        page_canvas.grid(row=0, column=0, sticky='nsew')
+        page_scrollbar.grid(row=0, column=1, sticky='ns')
+
+        # 鼠标滚轮（递归绑定到所有子控件，使任何位置都能滚页面）
+        def _on_page_mw(event):
+            page_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+
+        def _bind_page_mw(w):
+            for child in w.winfo_children():
+                try:
+                    child.bind('<MouseWheel>', _on_page_mw, add='+')
+                except Exception:
+                    pass
+                _bind_page_mw(child)
+
+        page_canvas.bind('<MouseWheel>', _on_page_mw)
+        self.page_container.bind('<MouseWheel>', _on_page_mw, add='+')
+        self.root.after(100, lambda: _bind_page_mw(self.page_container))
 
         # 创建所有页面
         self._create_pages()
@@ -695,20 +817,6 @@ class PdfToolApp:
         # 默认显示第一个
         self._switch_page("merge")
 
-        # 状态栏
-        self.status_var = ttk.StringVar(value="就绪")
-        status_bar_frame = ttk.Frame(self.root)
-        status_bar_frame.pack(fill='x', side='bottom')
-        status_bar = ttk.Label(status_bar_frame, textvariable=self.status_var,
-                               bootstyle=(LIGHT, INVERSE),
-                               anchor='w', padding=(10, 4))
-        status_bar.pack(side='left', fill='x', expand=True)
-        btn_pad = ttk.Frame(status_bar_frame)
-        btn_pad.pack(side='right', padx=(0, 16), pady=(4, 8))
-        ttk.Button(btn_pad, text="导出日志", command=self._export_log,
-                   bootstyle=INFO, width=8).pack(side='right', padx=(4, 0))
-        ttk.Button(btn_pad, text="查看日志", command=self._open_log,
-                   bootstyle=INFO, width=8).pack(side='right', padx=(4, 0))
 
     def _on_nav_hover(self, btn, icon_canvas, text_lbl, entering):
         """导航按钮悬停效果"""
@@ -767,6 +875,8 @@ class PdfToolApp:
             "pagesize": self._build_pagesize_page,
             "attach": self._build_attach_page,
             "repair": self._build_repair_page,
+            "pdf2word": self._build_pdf2word_page,
+            "pdf2image": self._build_pdf2image_page,
             "print": self._build_print_page,
         }
         for key, builder in builders.items():
@@ -806,10 +916,10 @@ class PdfToolApp:
         self.merge_output = ttk.StringVar()
 
         lf = ttk.Labelframe(parent, text="要合并的PDF文件（按顺序）", padding=10)
-        lf.pack(fill='both', expand=True, pady=(0, 6))
+        lf.pack(fill='x', pady=(0, 6))
 
         list_frame = ttk.Frame(lf)
-        list_frame.pack(fill='both', expand=True)
+        list_frame.pack(fill='x')
         self.merge_listbox = tk.Listbox(list_frame, height=6, bg='#FAFCFF',
                                          selectbackground='#1A73E8', selectforeground='white',
                                          font=(UI_FONT_FIXED, 9), relief='solid', bd=1,
@@ -1070,8 +1180,22 @@ class PdfToolApp:
         row.pack(fill='x', pady=4)
         ttk.Label(row, text="加密强度：", width=10, anchor='e').pack(side='left')
         for text, val in [("256位AES", "256"), ("128位AES", "128"), ("40位RC4", "40")]:
-            ttk.Radiobutton(row, text=text, value=val, variable=self.encrypt_key,
-                            bootstyle=PRIMARY).pack(side='left', padx=8)
+            rb = ttk.Radiobutton(row, text=text, value=val, variable=self.encrypt_key,
+                                 bootstyle=PRIMARY)
+            rb.pack(side='left', padx=8)
+
+        self.encrypt_hint = ttk.Label(parent, bootstyle=SECONDARY, font=(_get_ui_font(), 8))
+        self.encrypt_hint.pack(fill='x', padx=14, pady=(2, 0))
+
+        def _on_encrypt_change(*_):
+            hints = {
+                "256": "最安全，仅新版PDF阅读器（如Adobe Acrobat 7.0以上）支持",
+                "128": "安全且兼容性好，推荐大多数用户使用",
+                "40":  "所有PDF阅读器均可打开，但安全性较低",
+            }
+            self.encrypt_hint.config(text=hints.get(self.encrypt_key.get(), ""))
+        self.encrypt_key.trace_add('write', _on_encrypt_change)
+        _on_encrypt_change()
 
         self._make_action_bar(parent, [("执 行 加 密", self._do_encrypt, PRIMARY)])
 
@@ -1468,7 +1592,7 @@ class PdfToolApp:
 
         # 文件列表区域
         lf = ttk.Labelframe(parent, text="待打印文件", padding=10)
-        lf.pack(fill='both', expand=True, pady=(0, 8))
+        lf.pack(fill='x', pady=(0, 6))
 
         btn_row = ttk.Frame(lf)
         btn_row.pack(fill='x', pady=(0, 6))
@@ -1481,9 +1605,9 @@ class PdfToolApp:
 
         # 文件列表
         list_frame = ttk.Frame(lf)
-        list_frame.pack(fill='both', expand=True)
+        list_frame.pack(fill='x', pady=(0, 4))
 
-        self.print_listbox = tk.Listbox(list_frame, selectmode='extended',
+        self.print_listbox = tk.Listbox(list_frame, selectmode='extended', height=7,
                                          font=(_get_ui_font(), 9))
         scrollbar = ttk.Scrollbar(list_frame, orient='vertical',
                                   command=self.print_listbox.yview)
@@ -1620,31 +1744,207 @@ class PdfToolApp:
         log.info(f"打印结果: 成功={success}, 失败={fail}")
         Messagebox.show_info(msg, "打印结果")
 
+    # ==================== PDF转Word ====================
+    def _build_pdf2word_page(self, parent):
+        self.pdf2word_input = ttk.StringVar()
+        self.pdf2word_output = ttk.StringVar()
+        self.pdf2word_pages = ttk.StringVar()
+
+        self._make_file_row(parent, "输入文件：", self.pdf2word_input,
+                            lambda: self._browse_pdf(self.pdf2word_input, self.pdf2word_output,
+                                                     suffix='', out_ext='.docx'))
+        self._make_file_row(parent, "输出文件：", self.pdf2word_output,
+                            lambda: self._browse_save(self.pdf2word_output, title="保存Word文档",
+                                                      defaultextension=".docx",
+                                                      filetypes=[("Word文档", "*.docx")]))
+
+        lf = ttk.Labelframe(parent, text="转换设置", padding=10)
+        lf.pack(fill='x', pady=8)
+        row = ttk.Frame(lf)
+        row.pack(fill='x', pady=4)
+        ttk.Label(row, text="页码范围：", width=10, anchor='e').pack(side='left')
+        ttk.Entry(row, textvariable=self.pdf2word_pages, width=30).pack(side='left', padx=8)
+        ttk.Label(row, text="(留空=全部, 如: 1-3,5,7-9)", bootstyle=SECONDARY).pack(side='left', padx=4)
+
+        self._make_hint(parent, "说明：将PDF转换为可编辑的Word文档，保留原始排版")
+        self._make_action_bar(parent, [("执 行 转 换", self._do_pdf2word, PRIMARY)])
+
+    def _do_pdf2word(self):
+        if not self._check_input(self.pdf2word_input):
+            return
+        output = self.pdf2word_output.get().strip()
+        if not output:
+            Messagebox.show_warning("请指定输出Word文件", "提示")
+            return
+        if not _HAS_PDF2DOCX:
+            Messagebox.show_error("请先安装 pdf2docx：\n\npip install pdf2docx", "缺少依赖")
+            return
+
+        pages = self.pdf2word_pages.get().strip()
+        log.info(f"PDF转Word: {self.pdf2word_input.get()} -> {output}")
+        self.status_var.set("正在转换...")
+        self.root.update()
+        try:
+            cv = Pdf2DocxConverter(self.pdf2word_input.get())
+            if pages:
+                page_nums = self._parse_page_numbers(pages, 999999)
+                cv.convert(output, start=page_nums[0], end=page_nums[-1] + 1)
+            else:
+                cv.convert(output)
+            cv.close()
+            self.status_var.set("转换完成！")
+            log.info("PDF转Word成功")
+            Messagebox.show_info("转换完成！", "成功")
+        except Exception as e:
+            self.status_var.set("转换失败")
+            log.exception(f"PDF转Word失败: {e}")
+            Messagebox.show_error(f"转换失败：{e}", "错误")
+
+    # ==================== PDF转图片 ====================
+    def _build_pdf2image_page(self, parent):
+        self.pdf2image_input = ttk.StringVar()
+        self.pdf2image_output = ttk.StringVar()
+        self.pdf2image_format = ttk.StringVar(value="png")
+        self.pdf2image_dpi = ttk.StringVar(value="200")
+        self.pdf2image_pages = ttk.StringVar()
+
+        row = ttk.Frame(parent)
+        row.pack(fill='x', pady=5)
+        ttk.Label(row, text="输入文件：", width=10, anchor='e',
+                  font=(_get_ui_font(), 9)).pack(side='left')
+        ttk.Entry(row, textvariable=self.pdf2image_input).pack(side='left', fill='x', expand=True, padx=(8, 8))
+        ttk.Button(row, text="浏览...", command=lambda: self._browse_pdf(self.pdf2image_input, self.pdf2image_output,
+                   output_is_dir=True),
+                   bootstyle=PRIMARY, width=8).pack(side='left')
+
+        row = ttk.Frame(parent)
+        row.pack(fill='x', pady=5)
+        ttk.Label(row, text="输出目录：", width=10, anchor='e',
+                  font=(_get_ui_font(), 9)).pack(side='left')
+        ttk.Entry(row, textvariable=self.pdf2image_output).pack(side='left', fill='x', expand=True, padx=(8, 8))
+        ttk.Button(row, text="浏览...", command=lambda: self._browse_folder(self.pdf2image_output),
+                   bootstyle=PRIMARY, width=8).pack(side='left')
+
+        lf = ttk.Labelframe(parent, text="转换设置", padding=10)
+        lf.pack(fill='x', pady=8)
+
+        row = ttk.Frame(lf)
+        row.pack(fill='x', pady=4)
+        ttk.Label(row, text="图片格式：", width=10, anchor='e').pack(side='left')
+        for text, val in [("PNG", "png"), ("JPEG", "jpeg")]:
+            ttk.Radiobutton(row, text=text, value=val, variable=self.pdf2image_format,
+                            bootstyle=PRIMARY).pack(side='left', padx=8)
+
+        row = ttk.Frame(lf)
+        row.pack(fill='x', pady=4)
+        ttk.Label(row, text="清晰度：", width=10, anchor='e').pack(side='left')
+        ttk.Entry(row, textvariable=self.pdf2image_dpi, width=8).pack(side='left', padx=8)
+        ttk.Label(row, text="DPI（数值越高越清晰，文件也越大；72-600，默认200）", bootstyle=SECONDARY).pack(side='left', padx=4)
+
+        row = ttk.Frame(lf)
+        row.pack(fill='x', pady=4)
+        ttk.Label(row, text="页码范围：", width=10, anchor='e').pack(side='left')
+        ttk.Entry(row, textvariable=self.pdf2image_pages, width=30).pack(side='left', padx=8)
+        ttk.Label(row, text="(留空=全部, 如: 1-3,5)", bootstyle=SECONDARY).pack(side='left', padx=4)
+
+        self._make_hint(parent, "说明：将PDF每页转换为单独的图片文件，支持PNG和JPEG格式")
+        self._make_action_bar(parent, [("开 始 转 换", self._do_pdf2image, PRIMARY)])
+
+    def _do_pdf2image(self):
+        if not self._check_input(self.pdf2image_input):
+            return
+        output_dir = self.pdf2image_output.get().strip()
+        if not output_dir:
+            Messagebox.show_warning("请指定输出文件夹", "提示")
+            return
+        if not _HAS_FITZ:
+            Messagebox.show_error("请先安装 PyMuPDF：\n\npip install PyMuPDF", "缺少依赖")
+            return
+
+        img_format = self.pdf2image_format.get()
+        try:
+            dpi = int(self.pdf2image_dpi.get())
+        except ValueError:
+            Messagebox.show_warning("DPI 必须是数字", "提示")
+            return
+
+        pages = self.pdf2image_pages.get().strip()
+
+        log.info(f"PDF转图片: {self.pdf2image_input.get()} -> {output_dir} ({img_format}, {dpi}dpi)")
+        self.status_var.set("正在转换...")
+        self.root.update()
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            doc = fitz.open(self.pdf2image_input.get())
+            total = len(doc)
+
+            if pages:
+                page_nums = self._parse_page_numbers(pages, total)
+            else:
+                page_nums = list(range(total))
+
+            base_name = os.path.splitext(os.path.basename(self.pdf2image_input.get()))[0]
+            ext = 'jpg' if img_format == 'jpeg' else img_format
+
+            for i, page_num in enumerate(page_nums):
+                page = doc.load_page(page_num)
+                pix = page.get_pixmap(dpi=dpi)
+                filename = os.path.join(output_dir, f"{base_name}_p{page_num + 1}.{ext}")
+                pix.save(filename)
+                if (i + 1) % 5 == 0 or i == len(page_nums) - 1:
+                    self.status_var.set(f"正在转换... ({i + 1}/{len(page_nums)})")
+                    self.root.update()
+
+            doc.close()
+            self.status_var.set("转换完成！")
+            log.info(f"PDF转图片成功: {len(page_nums)} 页")
+            Messagebox.show_info(f"转换完成！共 {len(page_nums)} 页\n保存至：{output_dir}", "成功")
+        except Exception as e:
+            self.status_var.set("转换失败")
+            log.exception(f"PDF转图片失败: {e}")
+            Messagebox.show_error(f"转换失败：{e}", "错误")
+
     # ==================== 通用方法 ====================
-    def _browse_pdf(self, var, output_var=None, suffix='_out'):
+    def _browse_pdf(self, var, output_var=None, suffix='_out', out_ext='.pdf',
+                     output_is_dir=False):
         path = filedialog.askopenfilename(
             title="选择PDF文件",
             filetypes=[("PDF文件", "*.pdf"), ("所有文件", "*.*")]
         )
         if path:
+            path = os.path.normpath(path)
             var.set(path)
             log.info(f"选择输入文件: {path}")
-            # 自动设置输出文件路径（同目录 + 后缀）
-            if output_var is not None and not output_var.get():
-                base, ext = os.path.splitext(path)
-                output_var.set(f"{base}{suffix}{ext}")
+            # 自动设置输出文件路径（始终跟随输入文件变化）
+            if output_var is not None:
+                if output_is_dir:
+                    parent = os.path.dirname(path)
+                    base_name = os.path.splitext(os.path.basename(path))[0]
+                    output_var.set(os.path.join(parent, f"{base_name}_images"))
+                else:
+                    base, _ = os.path.splitext(path)
+                    output_var.set(f"{base}{suffix}{out_ext}")
 
-    def _browse_save(self, var):
+    def _browse_save(self, var, title="保存PDF文件", defaultextension=".pdf",
+                     filetypes=None):
+        if filetypes is None:
+            filetypes = [("PDF文件", "*.pdf")]
         path = filedialog.asksaveasfilename(
-            title="保存PDF文件",
-            defaultextension=".pdf",
-            filetypes=[("PDF文件", "*.pdf")]
+            title=title,
+            defaultextension=defaultextension,
+            filetypes=filetypes
         )
         if path:
-            if not path.lower().endswith('.pdf'):
-                path += '.pdf'
+            if not path.lower().endswith(defaultextension):
+                path += defaultextension
             var.set(path)
             log.info(f"选择输出文件: {path}")
+
+    def _browse_folder(self, var):
+        folder = filedialog.askdirectory(title="选择文件夹")
+        if folder:
+            var.set(folder)
+            log.info(f"选择输出目录: {folder}")
 
     def _check_input(self, input_var):
         if not input_var.get():
@@ -1672,6 +1972,30 @@ class PdfToolApp:
             Messagebox.show_error(f"qpdf.exe 不存在：\n{self.qpdf_path}", "错误")
             return False
         return True
+
+    @staticmethod
+    def _parse_page_numbers(pages_str, total_pages):
+        """解析页码字符串（如 '1-3,5,7-9'），返回 0 索引的页码列表"""
+        import re
+        pages = []
+        seen = set()
+        parts = [p.strip() for p in pages_str.split(',')]
+        for part in parts:
+            match = re.match(r'^(\d+)(?:-(\d+))?$', part)
+            if not match:
+                continue
+            start = int(match.group(1)) - 1
+            if match.group(2):
+                end = int(match.group(2))
+                for p in range(start, end):
+                    if 0 <= p < total_pages and p not in seen:
+                        pages.append(p)
+                        seen.add(p)
+            else:
+                if 0 <= start < total_pages and start not in seen:
+                    pages.append(start)
+                    seen.add(start)
+        return sorted(pages)
 
     def _run_cmd(self, cmd, success_msg):
         log.info(f"执行命令: {' '.join(cmd)}")

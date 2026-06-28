@@ -280,8 +280,43 @@ def ensure_font():
     return download_file(FONT_DOWNLOAD_URL, FA_TTF, "fa-solid-900.ttf")
 
 
+def _kill_running_process():
+    """检测并终止正在运行的旧版本程序"""
+    exe_name = f"{OUTPUT_NAME}.exe" if IS_WIN else OUTPUT_NAME
+    kill_count = 0
+    try:
+        if IS_WIN:
+            result = subprocess.run(
+                ['tasklist', '/FI', f'IMAGENAME eq {exe_name}', '/NH'],
+                capture_output=True, text=True, timeout=10
+            )
+            if exe_name.lower() in result.stdout.lower():
+                log(f"检测到 {exe_name} 正在运行，正在终止...")
+                subprocess.run(['taskkill', '/F', '/IM', exe_name],
+                               capture_output=True, timeout=10)
+                import time
+                time.sleep(1)
+                kill_count += 1
+        else:
+            result = subprocess.run(
+                ['pgrep', '-x', exe_name],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.stdout.strip():
+                log(f"检测到 {exe_name} 正在运行，正在终止...")
+                subprocess.run(['pkill', '-x', exe_name],
+                               capture_output=True, timeout=10)
+                import time
+                time.sleep(1)
+                kill_count += 1
+    except Exception as e:
+        log(f"检测旧进程时出错: {e}")
+    if kill_count > 0:
+        log("旧进程已终止，继续打包")
+
 def build():
     """执行 PyInstaller 打包"""
+    _kill_running_process()
     if os.path.exists(TEMP_QPDF_DIR):
         shutil.rmtree(TEMP_QPDF_DIR)
 
@@ -336,6 +371,8 @@ def build():
         "--add-data", f"{TEMP_QPDF_DIR}{ADD_DATA_SEP}qpdf",
         "--hidden-import", "ttkbootstrap",
         "--hidden-import", "PIL",
+        "--hidden-import", "pdf2docx",
+        "--hidden-import", "fitz",
         "--collect-all", "ttkbootstrap",
     ]
 
